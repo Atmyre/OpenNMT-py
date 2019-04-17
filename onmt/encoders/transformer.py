@@ -90,7 +90,7 @@ class TransformerEncoder(EncoderBase):
         super(TransformerEncoder, self).__init__()
 
         self.noise_r = noise_r
-        
+
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
             [TransformerEncoderLayer(
@@ -127,18 +127,18 @@ class TransformerEncoder(EncoderBase):
         for layer in self.transformer:
             out = layer(out, mask)
         out = self.layer_norm(out)
-        
+
         if noise and self.noise_r > 0:
             gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
             #print(self.noise_r, torch.zeros(hidden.size()).shape)
             #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
-            out = Variable(out) + Variable(gauss_noise.cuda())
+            out = out + gauss_noise.cuda()
         a = torch.zeros(emb.size()).cuda()
         a[0] = 1.
         return emb, out.transpose(0, 1).contiguous() * a, lengths
-        
-        
-        
-        
-        
-        
+
+
+
+
+
+
