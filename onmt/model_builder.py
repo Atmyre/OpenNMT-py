@@ -12,6 +12,7 @@ import onmt.modules
 from onmt.encoders import str2enc
 
 from onmt.decoders import str2dec
+from onmt.gans import str2gan
 
 from onmt.modules import Embeddings, CopyGenerator
 from onmt.modules.util_class import Cast
@@ -76,6 +77,13 @@ def build_decoder(opt, embeddings):
     dec_type = "ifrnn" if opt.decoder_type == "rnn" and opt.input_feed \
                else opt.decoder_type
     return str2dec[dec_type].from_opt(opt, embeddings)
+
+
+def build_gan_g(opt):
+    return str2gan["gan_g"].from_opt(opt)
+
+def build_gan_d(opt):
+    return str2gan["gan_d"].from_opt(opt)
 
 
 def load_test_model(opt, model_path=None):
@@ -154,6 +162,11 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     elif not gpu:
         device = torch.device("cpu")
     model = onmt.models.NMTModel(encoder, decoder)
+    
+    gan_g = build_gan_g(model_opt)
+    gan_d = build_gan_d(model_opt)
+    gan_g = gan_g.cuda()
+    gan_d = gan_d.cuda()
 
     # Build Generator.
     if not model_opt.copy_attn:
@@ -216,12 +229,12 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     model.to(device)
     if model_opt.model_dtype == 'fp16':
         model.half()
-
-    return model
+    
+    return model, gan_g, gan_d
 
 
 def build_model(model_opt, opt, fields, checkpoint):
     logger.info('Building model...')
-    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint)
+    model, gan_g, gan_d = build_base_model(model_opt, fields, use_gpu(opt), checkpoint)
     logger.info(model)
-    return model
+    return model, gan_g, gan_d

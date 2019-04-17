@@ -13,6 +13,7 @@ from onmt.trainer import build_trainer
 from onmt.models import build_model_saver
 from onmt.utils.logging import init_logger, logger
 from onmt.utils.parse import ArgumentParser
+import torch.optim
 
 
 def _check_save_model_path(opt):
@@ -82,7 +83,8 @@ def main(opt, device_id):
                 logger.info(' * %s vocab size = %d' % (sn, len(sf.vocab)))
 
     # Build model.
-    model = build_model(model_opt, opt, fields, checkpoint)
+    model, gan_g, gan_d = build_model(model_opt, opt, fields, checkpoint)
+    
     n_params, enc, dec = _tally_parameters(model)
     logger.info('encoder: %d' % enc)
     logger.info('decoder: %d' % dec)
@@ -91,12 +93,18 @@ def main(opt, device_id):
 
     # Build optimizer.
     optim = Optimizer.from_opt(model, opt, checkpoint=checkpoint)
+    optim_g = torch.optim.Adam(gan_g.parameters(),
+                         lr=opt.lr_gan_g,
+                         betas=(opt.beta1, 0.999))
+    optim_d = torch.optim.Adam(gan_d.parameters(),
+                         lr=opt.lr_gan_d,
+                         betas=(opt.beta1, 0.999))
 
     # Build model saver
     model_saver = build_model_saver(model_opt, opt, model, fields, optim)
 
     trainer = build_trainer(
-        opt, device_id, model, fields, optim, model_saver=model_saver)
+        opt, device_id, model, gan_g, gan_d, fields, optim, optim_g, optim_d, model_saver=model_saver)
 
     train_iter = build_dataset_iter("train", fields, opt)
     valid_iter = build_dataset_iter(

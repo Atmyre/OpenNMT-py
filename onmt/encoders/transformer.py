@@ -2,7 +2,10 @@
 Implementation of "Attention is All You Need"
 """
 
+import torch
 import torch.nn as nn
+
+from torch.autograd import Variable
 
 from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
@@ -82,10 +85,12 @@ class TransformerEncoder(EncoderBase):
         * memory_bank ``(src_len, batch_size, model_dim)``
     """
 
-    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings,
+    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings, noise_r,
                  max_relative_positions):
         super(TransformerEncoder, self).__init__()
 
+        self.noise_r = noise_r
+        
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
             [TransformerEncoderLayer(
@@ -104,9 +109,10 @@ class TransformerEncoder(EncoderBase):
             opt.transformer_ff,
             opt.dropout,
             embeddings,
+            opt.noise_r,
             opt.max_relative_positions)
 
-    def forward(self, src, lengths=None):
+    def forward(self, src, lengths=None, noise=True):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
 
@@ -121,5 +127,18 @@ class TransformerEncoder(EncoderBase):
         for layer in self.transformer:
             out = layer(out, mask)
         out = self.layer_norm(out)
-
-        return emb, out.transpose(0, 1).contiguous(), lengths
+        
+        if noise and self.noise_r > 0:
+            gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
+            #print(self.noise_r, torch.zeros(hidden.size()).shape)
+            #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
+            out = Variable(out) + Variable(gauss_noise.cuda())
+        a = torch.zeros(emb.size()).cuda()
+        a[0] = 1.
+        return emb, out.transpose(0, 1).contiguous() * a, lengths
+        
+        
+        
+        
+        
+        
