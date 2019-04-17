@@ -292,8 +292,11 @@ class Trainer(object):
                     for i in range(self.niters_gan_ae):
                         self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
                     for i in range(self.niters_gan_g):
-                        errG = self._gradient_accumulation_d(batches, normalization, 
+                        errG = self._gradient_accumulation_g(batches, normalization, 
                                                              total_stats, report_stats)
+                        
+                    print("GAN", errG.data.item(), errD.data.item(), 
+                          errD_real.data.item(), errD_fake.data.item())
 
             if valid_iter is not None and step % valid_steps == 0:
                 if self.gpu_verbose_level > 0:
@@ -400,12 +403,12 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.accum_count == 1:
                     self.optim.zero_grad()
-                z = Variable(torch.Tensor(args.batch_size, args.z_size).normal_(0, 1).cuda())
+                z = Variable(torch.Tensor(src.size()[1], 100).normal_(0, 1).cuda())
                 fake_hidden = self.gan_gen(z)
                 errG = self.gan_disc(fake_hidden)
                 errG.backward(self.one)
                 self.optimizer_gan_g.step()
-                return -(errD_real - errD_fake), errD_real, errD_fake
+            return errG
     
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats,
                                report_stats):
@@ -448,7 +451,7 @@ class Trainer(object):
                 gradient_penalty.backward()
                 
                 self.optimizer_gan_d.step()
-                return -(errD_real - errD_fake), errD_real, errD_fake
+            return -(errD_real - errD_fake), errD_real, errD_fake
              
                 
                 
