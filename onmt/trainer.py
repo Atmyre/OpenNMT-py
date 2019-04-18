@@ -20,7 +20,7 @@ from onmt.utils.logging import logger
 
 
 def build_trainer(opt, device_id, model, gan_gen, gan_disc, 
-                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None):
+                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None, gan_saver=None):
     """
     Simplify `Trainer` creation based on user `opt`s*
 
@@ -68,7 +68,8 @@ def build_trainer(opt, device_id, model, gan_gen, gan_disc,
                            accum_count, accum_steps,
                            n_gpu, gpu_rank,
                            gpu_verbose_level, report_manager,
-                           model_saver=model_saver if gpu_rank == 0 else None,
+                           model_saver=model_saver,
+                           gan_saver=gan_saver,
                            average_decay=average_decay,
                            average_every=average_every,
                            model_dtype=opt.model_dtype,
@@ -114,7 +115,7 @@ class Trainer(object):
                  norm_method="sents", accum_count=[1],
                  accum_steps=[0],
                  n_gpu=1, gpu_rank=1,
-                 gpu_verbose_level=0, report_manager=None, model_saver=None,
+                 gpu_verbose_level=0, report_manager=None, model_saver=None, gan_saver=None,
                  average_decay=0, average_every=1, model_dtype='fp32',
                  earlystopper=None, batch_size=4096):
         # Basic attributes.
@@ -294,9 +295,6 @@ class Trainer(object):
                     for i in range(self.niters_gan_g):
                         errG = self._gradient_accumulation_g(batches, normalization, 
                                                              total_stats, report_stats)
-                        
-                    print("GAN", errG.data.item(), errD.data.item(), 
-                          errD_real.data.item(), errD_fake.data.item())
 
             if valid_iter is not None and step % valid_steps == 0:
                 if self.gpu_verbose_level > 0:
@@ -324,6 +322,7 @@ class Trainer(object):
                 and (save_checkpoint_steps != 0
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
+                self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
                 break
@@ -487,7 +486,7 @@ class Trainer(object):
                 bptt = True
                 
                 _, real_hidden, _ = self.model.encoder(src, src_lengths)
-                #real_hidden.register_hook(grad_hook)
+                real_hidden.register_hook(grad_hook)
                 errD_real = self.gan_disc(real_hidden)
                 errD_real.backward(self.mone)
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)

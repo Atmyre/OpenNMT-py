@@ -10,7 +10,7 @@ from onmt.model_builder import build_model
 from onmt.utils.optimizers import Optimizer
 from onmt.utils.misc import set_random_seed
 from onmt.trainer import build_trainer
-from onmt.models import build_model_saver
+from onmt.models import build_model_saver, build_gan_saver
 from onmt.utils.logging import init_logger, logger
 from onmt.utils.parse import ArgumentParser
 import torch.optim
@@ -102,6 +102,7 @@ def main(opt, device_id):
 
     # Build model saver
     model_saver = build_model_saver(model_opt, opt, model, fields, optim)
+    gan_saver = build_gan_saver(model_opt, opt, gan_g, gan_d, fields, optim_g, optim_d)
 
     trainer = build_trainer(
         opt, device_id, model, gan_g, gan_d, fields, optim, optim_g, optim_d, model_saver=model_saver)

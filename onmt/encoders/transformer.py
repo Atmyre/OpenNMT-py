@@ -132,7 +132,7 @@ class TransformerEncoder(EncoderBase):
             gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
             #print(self.noise_r, torch.zeros(hidden.size()).shape)
             #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
-            out = Variable(out) + Variable(gauss_noise.cuda())
+            out = out + Variable(gauss_noise.cuda())
         a = torch.zeros(emb.size()).cuda()
         a[0] = 1.
         return emb, out.transpose(0, 1).contiguous() * a, lengths

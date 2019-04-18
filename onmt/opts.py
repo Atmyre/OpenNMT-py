@@ -344,6 +344,10 @@ def train_opts(parser):
               help="Model filename (the model will be saved as "
                    "<save_model>_N.pt where N is the number "
                    "of steps")
+    group.add('--save_gan', '-save_gan', default='gan',
+              help="GAM filename (the model will be saved as "
+                   "<save_gan>_N.pt where N is the number "
+                   "of steps")
 
     group.add('--save_checkpoint_steps', '-save_checkpoint_steps',
               type=int, default=5000,
