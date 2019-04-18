@@ -11,6 +11,25 @@ from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
 
+class AttentionPooling(nn.Module):
+    def __init__(self, enc_size, attn_size, dropout_rate=0.3):
+        super().__init__()
+        self.logits = nn.Sequential(
+            nn.Linear(enc_size, attn_size),
+            nn.Dropout(dropout_rate),
+            nn.Tanh(),
+            nn.Linear(attn_size, 1),
+        )
+        self.softmax = nn.Softmax(dim=-1)
+        
+    def forward(self, inp, mask=None):
+        logits = self.logits(inp)[:, :, 0]
+        if mask is not None:
+            constant = torch.full_like(logits, -1e-9, dtype=torch.float32)
+            logits = torch.where(mask, logits, constant)
+        probs = self.softmax(logits)
+        return torch.sum(inp * probs[:, :, None], dim=1)
+
 
 class TransformerEncoderLayer(nn.Module):
     """
@@ -98,6 +117,7 @@ class TransformerEncoder(EncoderBase):
                 max_relative_positions=max_relative_positions)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+        self.attention_pooling = AttentionPooling(d_model, d_model)
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -133,9 +153,12 @@ class TransformerEncoder(EncoderBase):
             #print(self.noise_r, torch.zeros(hidden.size()).shape)
             #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
             out = out + gauss_noise.cuda()
+        out1 = torch.zeros_like(out)
+        out1[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
+        out = out1.transpose(0, 1)
         a = torch.zeros(emb.size()).cuda()
         a[0] = 1.
-        return emb, out.transpose(0, 1).contiguous() * a, lengths
+        return emb, out.contiguous() * a, lengths
 
 
 

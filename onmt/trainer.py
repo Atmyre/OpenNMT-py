@@ -17,6 +17,7 @@ from torch.autograd import Variable
 
 import onmt.utils
 from onmt.utils.logging import logger
+# from onmt.generate import generate_sentences
 
 
 def build_trainer(opt, device_id, model, gan_gen, gan_disc,
@@ -242,6 +243,7 @@ class Trainer(object):
         Returns:
             The gathered statistics.
         """
+        last_valid_step = 0
         if valid_iter is None:
             logger.info('Start training loop without validation...')
         else:
@@ -295,10 +297,11 @@ class Trainer(object):
                         errG = self._gradient_accumulation_g(batches, normalization,
                                                              total_stats, report_stats)
 
-                    print("GAN", errG.data.item(), errD.data.item(),
-                          errD_real.data.item(), errD_fake.data.item())
+                    # print("GAN", errG.data.item(), errD.data.item(),
+                    #       errD_real.data.item(), errD_fake.data.item())
 
-            if valid_iter is not None and step % valid_steps == 0:
+            if valid_iter is not None and step - last_valid_step >= valid_steps:
+                last_valid_step = step
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
                                 % (self.gpu_rank, step))
