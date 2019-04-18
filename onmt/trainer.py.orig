@@ -20,8 +20,13 @@ from onmt.utils.logging import logger
 # from onmt.generate import generate_sentences
 
 
+<<<<<<< HEAD
+def build_trainer(opt, device_id, model, gan_gen, gan_disc, 
+                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None, gan_saver=None):
+=======
 def build_trainer(opt, device_id, model, gan_gen, gan_disc,
-                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None, gan_saver=None): 
+                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None):
+>>>>>>> bdb8d0b3e13b8ce991e93cb37ba4667610231d1a
     """
     Simplify `Trainer` creation based on user `opt`s*
 
