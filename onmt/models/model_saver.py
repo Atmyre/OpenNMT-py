@@ -141,6 +141,7 @@ class GANSaver:
                  keep_checkpoint=-1):
         self.base_path = base_path
         self.gen = gen
+        self.desc = desc
         self.model_opt = model_opt
         self.fields = fields
         self.gen_optim = gen_optim
@@ -150,7 +151,7 @@ class GANSaver:
         if keep_checkpoint > 0:
             self.checkpoint_queue = deque([], maxlen=keep_checkpoint)
 
-    def save(self, step):
+    def save(self, step, moving_average=None):
 
         gen_state_dict = self.gen.state_dict()
         desc_state_dict = self.desc.state_dict()

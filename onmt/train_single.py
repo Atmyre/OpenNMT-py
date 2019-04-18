@@ -105,7 +105,7 @@ def main(opt, device_id):
     gan_saver = build_gan_saver(model_opt, opt, gan_g, gan_d, fields, optim_g, optim_d)
 
     trainer = build_trainer(
-        opt, device_id, model, gan_g, gan_d, fields, optim, optim_g, optim_d, model_saver=model_saver)
+        opt, device_id, model, gan_g, gan_d, fields, optim, optim_g, optim_d, model_saver=model_saver, gan_saver=gan_saver)
 
     train_iter = build_dataset_iter("train", fields, opt)
     valid_iter = build_dataset_iter(
