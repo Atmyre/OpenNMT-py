@@ -44,6 +44,7 @@ class ReportMgrBase(object):
         self.report_every = report_every
         self.progress_step = 0
         self.start_time = start_time
+        self.last_reported = 0
 
     def start(self):
         self.start_time = time.time()
@@ -69,7 +70,8 @@ class ReportMgrBase(object):
             raise ValueError("""ReportMgr needs to be started
                                 (set 'start_time' or use 'start()'""")
 
-        if step % self.report_every == 0:
+        if step - self.last_reported >= self.report_every:
+            self.last_reported = step
             if multigpu:
                 report_stats = \
                     onmt.utils.Statistics.all_gather_stats(report_stats)

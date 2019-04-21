@@ -33,8 +33,8 @@ class TransformerDecoderLayer(nn.Module):
         elif self_attn_type == "average":
             self.self_attn = AverageAttention(d_model, dropout=dropout)
 
-#         self.context_attn = MultiHeadedAttention(
-#             heads, d_model, dropout=dropout)
+        self.context_attn = MultiHeadedAttention(
+            heads, d_model, dropout=dropout)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm_1 = nn.LayerNorm(d_model, eps=1e-6)
         self.layer_norm_2 = nn.LayerNorm(d_model, eps=1e-6)
@@ -80,11 +80,11 @@ class TransformerDecoderLayer(nn.Module):
         query = self.drop(query) + inputs
 
         query_norm = self.layer_norm_2(query)
-#         mid, attn = self.context_attn(memory_bank, memory_bank, query_norm,
-#                                       mask=src_pad_mask,
-#                                       layer_cache=layer_cache,
-#                                       type="context")
-        output = self.feed_forward(query)
+        mid, attn = self.context_attn(memory_bank, memory_bank, query_norm,
+                                      mask=src_pad_mask,
+                                      layer_cache=layer_cache,
+                                      type="context")
+        output = self.feed_forward(self.drop(mid) + query)
 
         return output, attn
 

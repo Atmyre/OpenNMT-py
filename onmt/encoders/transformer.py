@@ -12,7 +12,7 @@ from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
 
 class AttentionPooling(nn.Module):
-    def __init__(self, enc_size, attn_size, dropout_rate=0.3):
+    def __init__(self, enc_size, attn_size, dropout_rate=0.0):
         super().__init__()
         self.logits = nn.Sequential(
             nn.Linear(enc_size, attn_size),
