@@ -82,6 +82,7 @@ def build_decoder(opt, embeddings):
 def build_gan_g(opt):
     return str2gan["gan_g"].from_opt(opt)
 
+
 def build_gan_d(opt):
     return str2gan["gan_d"].from_opt(opt)
 
@@ -103,12 +104,15 @@ def load_test_model(opt, model_path=None):
     else:
         fields = vocab
 
-    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
+    model, gan_g, gan_d = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
                              opt.gpu)
     if opt.fp32:
         model.float()
     model.eval()
     model.generator.eval()
+
+    gan_g.eval()
+    gan_d.eval()
     return fields, model, model_opt
 
 
@@ -162,11 +166,9 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     elif not gpu:
         device = torch.device("cpu")
     model = onmt.models.NMTModel(encoder, decoder)
-    
+
     gan_g = build_gan_g(model_opt)
     gan_d = build_gan_d(model_opt)
-    gan_g = gan_g.cuda()
-    gan_d = gan_d.cuda()
 
     # Build Generator.
     if not model_opt.copy_attn:
@@ -229,7 +231,10 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     model.to(device)
     if model_opt.model_dtype == 'fp16':
         model.half()
-    
+
+    gan_g.to(device)
+    gan_d.to(device)
+
     return model, gan_g, gan_d
 
 
