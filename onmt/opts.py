@@ -11,6 +11,8 @@ def config_opts(parser):
     parser.add('-save_config', '--save_config', required=False,
                is_write_out_config_file_arg=True,
                help='config file save path')
+    parser.add('-arae', '--arae', action='store_true',
+                help='add arae setting')
 
 
 def model_opts(parser):
@@ -96,6 +98,7 @@ def model_opts(parser):
               help="Size of decoder rnn hidden states. "
                    "Must be equal to enc_rnn_size except for "
                    "speech-to-text.")
+    # ARAE Options
     group.add('--noise_r', '-noise_r', type=float, default=0.05,
                     help='stdev of noise for autoencoder (regularizer)')
     group.add('--niters_gan_d', '-niters_gan_d', type=int, default=5,
@@ -120,14 +123,8 @@ def model_opts(parser):
                     help='critic/discriminator architecture (MLP)')
     group.add('--niters_ae', '-niters_ae', type=int, default=1,
                     help='number of autoencoder iterations in training')
-#     group.add('--niters_gan_d', '-niters_gan_d', type=int, default=5,
-#                     help='number of discriminator iterations in training')
-#     group.add('--niters_gan_g', '-niters_gan_g', type=int, default=1,
-#                     help='number of generator iterations in training')
-#     group.add('--niters_gan_ae', '-niters_gan_ae', type=int, default=1,
-#                     help='number of gan-into-ae iterations in training')
-    
-    
+
+
     group.add('--audio_enc_pooling', '-audio_enc_pooling',
               type=str, default='1',
               help="The amount of pooling of audio encoder, "

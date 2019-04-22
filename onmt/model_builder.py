@@ -104,19 +104,22 @@ def load_test_model(opt, model_path=None):
     else:
         fields = vocab
 
-    model, gan_g, gan_d = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
-                             opt.gpu)
+    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
+                             opt.gpu, arae_setting=opt.arae)
+    if opt.arae:
+        model, gan_g, gan_d = model
+        gan_g.eval()
+        gan_d.eval()
+
     if opt.fp32:
         model.float()
     model.eval()
     model.generator.eval()
 
-    gan_g.eval()
-    gan_d.eval()
-    return fields, model, model_opt
+    return fields, (model, gan_g, gan_d), model_opt
 
 
-def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
+def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False):
     """Build a model from opts.
 
     Args:
@@ -166,9 +169,6 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     elif not gpu:
         device = torch.device("cpu")
     model = onmt.models.NMTModel(encoder, decoder)
-
-    gan_g = build_gan_g(model_opt)
-    gan_d = build_gan_d(model_opt)
 
     # Build Generator.
     if not model_opt.copy_attn:
@@ -232,14 +232,19 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     if model_opt.model_dtype == 'fp16':
         model.half()
 
-    gan_g.to(device)
-    gan_d.to(device)
+    if arae_setting:
+        gan_g = build_gan_g(model_opt)
+        gan_d = build_gan_d(model_opt)
 
-    return model, gan_g, gan_d
+        gan_g.to(device)
+        gan_d.to(device)
+        model = model, gan_g, gan_d
+
+    return model
 
 
 def build_model(model_opt, opt, fields, checkpoint):
     logger.info('Building model...')
-    model, gan_g, gan_d = build_base_model(model_opt, fields, use_gpu(opt), checkpoint)
+    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint, arae_setting=opt.arae)
     logger.info(model)
-    return model, gan_g, gan_d
+    return model
