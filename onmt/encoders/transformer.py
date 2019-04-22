@@ -118,7 +118,8 @@ class TransformerEncoder(EncoderBase):
                 max_relative_positions=max_relative_positions)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.attention_pooling = AttentionPooling(d_model, d_model)
+        if arae_setting:
+            self.attention_pooling = AttentionPooling(d_model, d_model)
 
     @classmethod
     def from_opt(cls, opt, embeddings):

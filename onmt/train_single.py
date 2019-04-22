@@ -83,7 +83,7 @@ def main(opt, device_id):
                 logger.info(' * %s vocab size = %d' % (sn, len(sf.vocab)))
 
     # Build model.
-    model = build_model(model_opt, opt, fields, checkpoint, arae_setting=opt.arae)
+    model = build_model(model_opt, opt, fields, checkpoint)
     if opt.arae:
         model, gan_g, gan_d = model
 

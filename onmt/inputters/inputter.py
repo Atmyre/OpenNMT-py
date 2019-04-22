@@ -588,6 +588,7 @@ class DatasetLazyIter(object):
             for batch in self._iter_dataset(path):
                 yield batch
                 num_batches += 1
+        print('num_batches_multiple', num_batches_multiple)
         if self.is_train and not self.repeat and \
            num_batches % self.num_batches_multiple != 0:
             # When the dataset is not repeated, we might need to ensure that

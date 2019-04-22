@@ -76,13 +76,15 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            model_dtype=opt.model_dtype,
                            earlystopper=earlystopper,
                            arae_setting=opt.arae,
-                           opt.niters_ae, opt.niters_gan_g, opt.niters_gan_d, opt.niters_gan_ae)
+                           niters_ae=opt.niters_ae,
+                           niters_gan_g=opt.niters_gan_g,
+                           niters_gan_d=opt.niters_gan_d,
+                           niters_gan_ae=opt.niters_gan_ae)
     return trainer
 
 
 def grad_hook(grad):
     #gan_norm = torch.norm(grad, p=2, dim=1).detach().data.mean()
-    #print(gan_norm, autoencoder.grad_norm)
     return grad * 0.1
 
 class Trainer(object):
@@ -141,6 +143,8 @@ class Trainer(object):
             self.niters_gan_d = niters_gan_d
             self.niters_gan_ae = niters_gan_ae
 
+            self.gan_saver = gan_saver
+
             self.one = torch.Tensor(1).fill_(1)
             self.mone = self.one * -1
 
@@ -163,7 +167,6 @@ class Trainer(object):
         self.gpu_verbose_level = gpu_verbose_level
         self.report_manager = report_manager
         self.model_saver = model_saver
-        self.gan_saver = gan_saver
         self.average_decay = average_decay
         self.moving_average = None
         self.average_every = average_every
@@ -317,9 +320,6 @@ class Trainer(object):
                         for i in range(self.niters_gan_g):
                             errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
 
-                    # print("GAN", errG.data.item(), errD.data.item(),
-                    #       errD_real.data.item(), errD_fake.data.item())
-
             if valid_iter is not None and step - last_valid_step >= valid_steps:
                 if self.arae_setting:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
@@ -350,14 +350,16 @@ class Trainer(object):
                 and (save_checkpoint_steps != 0
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
-                self.gan_saver.save(step, moving_average=self.moving_average)
+                if self.arae_setting:
+                    self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
                 break
 
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
-            self.gan_saver.save(step, moving_average=self.moving_average)
+            if self.arae_setting:
+                self.gan_saver.save(step, moving_average=self.moving_average)
         return total_stats
 
     def validate(self, valid_iter, moving_average=None):
