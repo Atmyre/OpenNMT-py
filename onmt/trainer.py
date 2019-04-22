@@ -87,6 +87,7 @@ def grad_hook(grad):
     #gan_norm = torch.norm(grad, p=2, dim=1).detach().data.mean()
     return grad * 0.1
 
+
 class Trainer(object):
     """
     Class that controls the training process.
@@ -145,7 +146,8 @@ class Trainer(object):
 
             self.gan_saver = gan_saver
 
-            self.one = torch.Tensor(1).fill_(1)
+            device = torch.device("cuda" if n_gpu > 0 else "cpu")
+            self.one = torch.Tensor(1).fill_(1).to(device)
             self.mone = self.one * -1
 
             gan_gen.train()
@@ -265,7 +267,6 @@ class Trainer(object):
         Returns:
             The gathered statistics.
         """
-        last_valid_step = 0
         if valid_iter is None:
             logger.info('Start training loop without validation...')
         else:
@@ -283,6 +284,12 @@ class Trainer(object):
         for i, (batches, normalization) in enumerate(
                 self._accum_batches(train_iter)):
             step = self.optim.training_step
+
+            if self.arae_setting:  # fix step for arae setting
+                ac_gae_steps = 0
+                if i > 0:
+                    ac_gae_steps = (i-1) // self.niters_ae + 1
+                step -= self.niters_gan_ae * ac_gae_steps + 1
 
             if self.gpu_verbose_level > 1:
                 logger.info("GpuRank %d: index: %d", self.gpu_rank, i)
@@ -320,11 +327,10 @@ class Trainer(object):
                         for i in range(self.niters_gan_g):
                             errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
 
-            if valid_iter is not None and step - last_valid_step >= valid_steps:
+            if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
                         .format(errG.data.item(), errD.data.item(), errD_real.data.item(), errD_fake.data.item()))
-                last_valid_step = step
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
                                 % (self.gpu_rank, step))
