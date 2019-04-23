@@ -845,7 +845,3 @@ class Translator(object):
         ).decode("utf-8").strip()
         return msg
 
-
-class Generator(object):
-    def __init__(self):
-        pass
