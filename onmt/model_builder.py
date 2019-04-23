@@ -116,7 +116,10 @@ def load_test_model(opt, model_path=None):
     model.eval()
     model.generator.eval()
 
-    return fields, (model, gan_g, gan_d), model_opt
+    if opt.arae:
+        model = model, gan_g, gan_d
+
+    return fields, model, model_opt
 
 
 def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False):

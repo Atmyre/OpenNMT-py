@@ -23,8 +23,11 @@ class TransformerDecoderLayer(nn.Module):
     """
 
     def __init__(self, d_model, heads, d_ff, dropout,
-                 self_attn_type="scaled-dot", max_relative_positions=0):
+                 self_attn_type="scaled-dot", max_relative_positions=0,
+                 arae_setting=False):
         super(TransformerDecoderLayer, self).__init__()
+
+        self.arae_setting = arae_setting
 
         if self_attn_type == "scaled-dot":
             self.self_attn = MultiHeadedAttention(
@@ -46,7 +49,7 @@ class TransformerDecoderLayer(nn.Module):
         Args:
             inputs (FloatTensor): ``(batch_size, 1, model_dim)``
             memory_bank (FloatTensor): ``(batch_size, src_len, model_dim)``
-            src_pad_mask (LongTensor): ``(batch_size, 1, src_len)``
+            src_pad_mask (LongTensor): ``(batch_size, 1, src_len)``, None for arae
             tgt_pad_mask (LongTensor): ``(batch_size, 1, 1)``
 
         Returns:
@@ -81,7 +84,7 @@ class TransformerDecoderLayer(nn.Module):
 
         query_norm = self.layer_norm_2(query)
         mid, attn = self.context_attn(memory_bank, memory_bank, query_norm,
-                                      mask=src_pad_mask,
+                                      mask=src_pad_mask,  # None for arae
                                       layer_cache=layer_cache,
                                       type="context")
         output = self.feed_forward(self.drop(mid) + query)
@@ -121,8 +124,10 @@ class TransformerDecoder(DecoderBase):
 
     def __init__(self, num_layers, d_model, heads, d_ff,
                  copy_attn, self_attn_type, dropout, embeddings,
-                 max_relative_positions):
+                 max_relative_positions, arae_setting=False):
         super(TransformerDecoder, self).__init__()
+
+        self.arae_setting = arae_setting
 
         self.embeddings = embeddings
 
@@ -132,7 +137,7 @@ class TransformerDecoder(DecoderBase):
         self.transformer_layers = nn.ModuleList(
             [TransformerDecoderLayer(d_model, heads, d_ff, dropout,
              self_attn_type=self_attn_type,
-             max_relative_positions=max_relative_positions)
+             max_relative_positions=max_relative_positions, arae_setting=arae_setting)
              for i in range(num_layers)])
 
         # previously, there was a GlobalAttention module here for copy
@@ -153,7 +158,8 @@ class TransformerDecoder(DecoderBase):
             opt.self_attn_type,
             opt.dropout,
             embeddings,
-            opt.max_relative_positions)
+            opt.max_relative_positions,
+            opt.arae)
 
     def init_state(self, src, memory_bank, enc_hidden):
         """Initialize decoder state."""
@@ -182,9 +188,12 @@ class TransformerDecoder(DecoderBase):
             self._init_cache(memory_bank)
 
         src = self.state["src"]
-        src_words = src[:, :, 0].transpose(0, 1)
+        if self.arae_setting:
+            src_words, src_batch, src_len = None, None, None
+        else:
+            src_words = src[:, :, 0].transpose(0, 1)
+            src_batch, src_len = src_words.size()
         tgt_words = tgt[:, :, 0].transpose(0, 1)
-        src_batch, src_len = src_words.size()
         tgt_batch, tgt_len = tgt_words.size()
 
         emb = self.embeddings(tgt, step=step)
@@ -194,7 +203,10 @@ class TransformerDecoder(DecoderBase):
         src_memory_bank = memory_bank.transpose(0, 1).contiguous()
 
         pad_idx = self.embeddings.word_padding_idx
-        src_pad_mask = src_words.data.eq(pad_idx).unsqueeze(1)  # [B, 1, T_src]
+        if self.arae_setting:
+            src_pad_mask = None
+        else:
+            src_pad_mask = src_words.data.eq(pad_idx).unsqueeze(1)  # [B, 1, T_src]
         tgt_pad_mask = tgt_words.data.eq(pad_idx).unsqueeze(1)  # [B, 1, T_tgt]
 
         for i, layer in enumerate(self.transformer_layers):
@@ -203,7 +215,7 @@ class TransformerDecoder(DecoderBase):
             output, attn = layer(
                 output,
                 src_memory_bank,
-                src_pad_mask,
+                src_pad_mask,  # None in arae
                 tgt_pad_mask,
                 layer_cache=layer_cache,
                 step=step)
