@@ -121,7 +121,7 @@ def model_opts(parser):
                     help='generator architecture (MLP)')
     group.add('--desc_layers', '-desc_layers', type=str, default='300-300',
                     help='critic/discriminator architecture (MLP)')
-    group.add('--niters_ae', '-niters_ae', type=int, default=1,
+    group.add('--niters_ae', '-niters_ae', type=int, default=3,
                     help='number of autoencoder iterations in training')
 
 

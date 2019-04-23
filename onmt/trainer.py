@@ -14,6 +14,7 @@ import itertools
 import torch
 import traceback
 from torch.autograd import Variable
+import numpy as np
 
 import onmt.utils
 from onmt.utils.logging import logger
@@ -70,7 +71,7 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            accum_count, accum_steps,
                            n_gpu, gpu_rank,
                            gpu_verbose_level, report_manager,
-                           model_saver=model_saver if gpu_rank == 0 else None,
+                           model_saver=model_saver,
                            average_decay=average_decay,
                            average_every=average_every,
                            model_dtype=opt.model_dtype,
@@ -330,7 +331,7 @@ class Trainer(object):
             if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
-                        .format(errG.data.item(), errD.data.item(), errD_real.data.item(), errD_fake.data.item()))
+                        .format(np.mean(errG), np.mean(errD), np.mean(errD_real), np.mean(errD_fake)))
 
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
@@ -431,7 +432,7 @@ class Trainer(object):
             errG = self.gan_disc(fake_hidden)
             errG.backward(self.one)
             self.optimizer_gan_g.step()
-            errGs.append(errG)
+            errGs.append(errG.data.item())
         return errGs
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
@@ -467,11 +468,11 @@ class Trainer(object):
 
             self.optimizer_gan_d.step()
 
-            errD_reals.append(errD_real)
-            errD_fakes.append(errD_fake)
+            errD_reals.append(errD_real.data.item())
+            errD_fakes.append(errD_fake.data.item())
             
                 
-        return errD_reals, errD_fakes
+        return -(np.array(errD_reals) - np.array(errD_fakes)), errD_reals, errD_fakes
 
 
 
