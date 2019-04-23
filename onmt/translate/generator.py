@@ -60,7 +60,8 @@ class TextGenerator(object):
     def generate(self, n_sents):
         batch_size = n_sents
         # get Z
-        noise = torch.Tensor(n_sents, 100).normal_(0, 1).to(self.device)
+        z_hidden_size = self.gan_gen.ninput
+        noise = torch.Tensor(n_sents, z_hidden_size).normal_(0, 1).to(self.device)
         fake_hidden = self.gan_g(noise)
 
         memory_bank = torch.zeros(25, n_sents, 512)  # 25 is an avg length of sent, 512 - internal repr

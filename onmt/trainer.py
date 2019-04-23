@@ -17,7 +17,6 @@ from torch.autograd import Variable
 
 import onmt.utils
 from onmt.utils.logging import logger
-# from onmt.generate import generate_sentences
 
 
 def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
@@ -426,7 +425,8 @@ class Trainer(object):
 
 
             # 2. F-prop all but generator.
-            z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
+            z_hidden_size = self.gan_gen.ninput
+            z = Variable(torch.Tensor(src.size()[1], z_hidden_size).normal_(0, 1).cuda())
             fake_hidden = self.gan_gen(z)
             errG = self.gan_disc(fake_hidden)
             errG.backward(self.one)
