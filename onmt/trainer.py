@@ -329,7 +329,7 @@ class Trainer(object):
             if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
-                        .format(errG[-1].data.item(), errD[-1].data.item(), errD_real[-1].data.item(), errD_fake[-1].data.item()))
+                        .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
 
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
@@ -467,7 +467,7 @@ class Trainer(object):
             gradient_penalty.backward()
 
             self.optimizer_gan_d.step()
-            
+
             errD_reals.append(errD_real)
             errD_fakes.append(errD_fake)
             errDs.append(errD_fake - errD_real)

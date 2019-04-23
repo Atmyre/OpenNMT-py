@@ -104,8 +104,9 @@ def load_test_model(opt, model_path=None):
     else:
         fields = vocab
 
+    arae_model_path = opt.model_arae if opt.arae and checkpoint else None
     model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
-                             opt.gpu, arae_setting=opt.arae)
+                             opt.gpu, arae_setting=opt.arae, arae_model_path=arae_model_path)
     if opt.arae:
         model, gan_g, gan_d = model
         gan_g.eval()
@@ -122,7 +123,7 @@ def load_test_model(opt, model_path=None):
     return fields, model, model_opt
 
 
-def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False):
+def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False, arae_model_path=None):
     """Build a model from opts.
 
     Args:
@@ -238,6 +239,12 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_
     if arae_setting:
         gan_g = build_gan_g(model_opt)
         gan_d = build_gan_d(model_opt)
+
+        if arae_model_path is not None:
+            print('Loading arae model from: {}'.format(arae_model_path))
+            loaded = torch.load(arae_model_path, map_location=lambda storage, loc: storage)
+            gan_g.load_state_dict(loaded.get('gen'))
+            gan_d.load_state_dict(loaded.get('desc'))
 
         gan_g.to(device)
         gan_d.to(device)

@@ -41,7 +41,7 @@ class MLP_D(nn.Module):
 #         self.add_module("activation"+str(len(self.layers)), activation)
 
         self.init_weights()
-        
+
     @classmethod
     def from_opt(cls, opt):
         """Alternate constructor."""
@@ -92,7 +92,7 @@ class MLP_G(nn.Module):
         self.add_module("layer"+str(len(self.layers)), layer)
 
         self.init_weights()
-        
+
     @classmethod
     def from_opt(cls, opt):
         """Alternate constructor."""

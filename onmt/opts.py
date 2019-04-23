@@ -569,6 +569,8 @@ def translate_opts(parser):
               help="Path to model .pt file(s). "
                    "Multiple models can be specified, "
                    "for ensemble decoding.")
+    group.add('--model_arae', '-model_arae', type=str, required=True,
+              help='Path to arae model .pt file')
     group.add('--fp32', '-fp32', action='store_true',
               help="Force the model to be in FP32 "
                    "because FP16 is very slow on GTX1080(ti).")

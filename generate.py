@@ -19,32 +19,14 @@ def dump_sent(sents):
 
 def main(opt):
     ArgumentParser.validate_generate_opts(opt)
-    #logger = init_logger(opt.log_file)
 
     generator = build_generator(opt)
     sents = generator.generate(n_sents=10)
     dump_sent(sents)
 
-    '''
-    src_shards = split_corpus(opt.src, opt.shard_size)
-    tgt_shards = split_corpus(opt.tgt, opt.shard_size) \
-        if opt.tgt is not None else repeat(None)
-    shard_pairs = zip(src_shards, tgt_shards)
-
-    for i, (src_shard, tgt_shard) in enumerate(shard_pairs):
-        logger.info("Translating shard %d." % i)
-        translator.translate(
-            src=src_shard,
-            tgt=tgt_shard,
-            src_dir=opt.src_dir,
-            batch_size=opt.batch_size,
-            attn_debug=opt.attn_debug
-            )
-    '''
-
 
 def _get_parser():
-    parser = ArgumentParser(description='translate.py')
+    parser = ArgumentParser(description='generate.py')
 
     opts.config_opts(parser)
     opts.translate_opts(parser)

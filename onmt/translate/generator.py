@@ -60,7 +60,7 @@ class TextGenerator(object):
     def generate(self, n_sents):
         batch_size = n_sents
         # get Z
-        z_hidden_size = self.gan_gen.ninput
+        z_hidden_size = self.gan_g.ninput
         noise = torch.Tensor(n_sents, z_hidden_size).normal_(0, 1).to(self.device)
         fake_hidden = self.gan_g(noise)
 
@@ -88,7 +88,13 @@ class TextGenerator(object):
         tokens = self._convert_idxs_to_tokens(reconstruct_seq)
         # filter <eos> after the first one
         eos_token = self.tgt_field.eos_token
-        tokens = [tokens_line[:tokens_line.index(eos_token)+1] for tokens_line in tokens]
+
+        def get_slice_idx(tokens_line):
+            if eos_token not in tokens_line:
+                return len(tokens_line)
+            return tokens_line.index(eos_token)+1
+
+        tokens = [tokens_line[:get_slice_idx(tokens_line)] for tokens_line in tokens]
         sents = [' '.join(token_line) for token_line in tokens]
         return sents
 

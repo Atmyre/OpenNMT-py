@@ -159,9 +159,10 @@ class TransformerEncoder(EncoderBase):
             out = out + gauss_noise.to(device)
 
         out_new = torch.zeros_like(out)
-        out_new[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
+        # comment for a while
+        #out_new[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
         out = out_new.transpose(0, 1)
-        token_mask = torch.zeros_like(emb).to(device)
+        token_mask = torch.zeros_like(out).to(device)
         token_mask[0] = 1.
         return emb, out.contiguous() * token_mask, lengths
 
