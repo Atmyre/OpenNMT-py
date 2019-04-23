@@ -112,7 +112,7 @@ def model_opts(parser):
                     help='critic/discriminator learning rate')
     group.add('--beta1', '-beta1', type=float, default=0.5,
                     help='beta1 for adam. default=0.5')
-    group.add('--gen_input', '-gen_input', type=int, default=100,
+    group.add('--gen_input', '-gen_input', type=int, default=500,
                     help='dimension of random noise z to feed into generator')
     group.add('--gen_layers', '-gen_layers', type=str, default='300-300',
                     help='generator architecture (MLP)')

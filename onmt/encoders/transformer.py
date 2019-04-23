@@ -148,16 +148,24 @@ class TransformerEncoder(EncoderBase):
             out = layer(out, mask)
         out = self.layer_norm(out)
 
-        if noise and self.noise_r > 0:
-            gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
-            #print(self.noise_r, torch.zeros(hidden.size()).shape)
-            #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
-            out = out + gauss_noise.cuda()
         out1 = torch.zeros_like(out)
         out1[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
         out = out1.transpose(0, 1)
         a = torch.zeros(emb.size()).cuda()
         a[0] = 1.
+        
+#         print("OUT", out)
+#         print("NORM", torch.norm(out, p=2, dim=1, keepdim=True))
+        x = out[0] / torch.norm(out[0], p=2, dim=1, keepdim=True)
+        y = torch.zeros_like(out)
+        y[0] = x
+        out = y
+        
+        if noise and self.noise_r > 0:
+            gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
+            #print(self.noise_r, torch.zeros(hidden.size()).shape)
+            #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
+            out = out + gauss_noise.cuda()
         return emb, out.contiguous() * a, lengths
 
 

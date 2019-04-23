@@ -291,7 +291,7 @@ class Trainer(object):
             if i % self.niters_ae == 0:
                 for k in range(1):
                     for i in range(self.niters_gan_d):
-                        errD, errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
+                        errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
                                                                                    total_stats, report_stats)
                     for i in range(self.niters_gan_ae):
                         self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
@@ -385,121 +385,90 @@ class Trainer(object):
     def _gradient_accumulation_g(self, true_batches, normalization, total_stats,
                                report_stats):
         self.gan_gen.train()
-        self.optimizer_gan_g.zero_grad()
 
+        errGs = []
         for k, batch in enumerate(true_batches):
-            target_size = batch.tgt.size(0)
-            # Truncated BPTT: reminder not compatible with accum > 1
-            if self.trunc_size:
-                trunc_size = self.trunc_size
-            else:
-                trunc_size = target_size
-
+            
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                 else (batch.src, None)
-            if src_lengths is not None:
-                report_stats.n_src_words += src_lengths.sum().item()
+            
+            if self.accum_count == 1:
+                self.optimizer_gan_g.zero_grad()
+            
 
-            tgt_outer = batch.tgt
-
-            bptt = False
-            for j in range(0, target_size-1, trunc_size):
-                # 1. Create truncated target.
-                tgt = tgt_outer[j: j + trunc_size]
-
-                # 2. F-prop all but generator.
-                if self.accum_count == 1:
-                    self.optim.zero_grad()
-                z = Variable(torch.Tensor(src.size()[1], 100).normal_(0, 1).cuda())
-                fake_hidden = self.gan_gen(z)
-                errG = self.gan_disc(fake_hidden)
-                errG.backward(self.one)
-                self.optimizer_gan_g.step()
-            return errG
+            # 2. F-prop all but generator.
+            z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
+            fake_hidden = self.gan_gen(z)
+            errG = self.gan_disc(fake_hidden)
+            errG.backward(self.one)
+            self.optimizer_gan_g.step()
+            errGs.append(errG)
+        return errGs
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats,
                                report_stats):
         self.gan_disc.train()
-        self.optimizer_gan_d.zero_grad()
 
+        errD_reals = []
+        errD_fakes = []
+        
         for k, batch in enumerate(true_batches):
-            target_size = batch.tgt.size(0)
-            # Truncated BPTT: reminder not compatible with accum > 1
-            if self.trunc_size:
-                trunc_size = self.trunc_size
-            else:
-                trunc_size = target_size
 
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                else (batch.src, None)
-            if src_lengths is not None:
-                report_stats.n_src_words += src_lengths.sum().item()
+                else (batch.src, None)    
+            
+            if self.accum_count == 1:
+                self.optimizer_gan_d.zero_grad()
 
-            tgt_outer = batch.tgt
+            # 2. F-prop all but generator.
+            _, real_hidden, _ = self.model.encoder(src, src_lengths)
+            errD_real = self.gan_disc(real_hidden.detach()[0, :, :])
+            errD_real.backward(self.one)
+            
+#             print("Real", errD_real.data)
 
-            bptt = False
-            for j in range(0, target_size-1, trunc_size):
-                # 1. Create truncated target.
-                tgt = tgt_outer[j: j + trunc_size]
+            z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
+            fake_hidden = self.gan_gen(z)
+            errD_fake = self.gan_disc(fake_hidden.detach())
+            errD_fake.backward(self.mone)
+            
+#             print("Fake", errD_fake.data)
 
-                # 2. F-prop all but generator.
-                if self.accum_count == 1:
-                    self.optim.zero_grad()
-                _, real_hidden, _ = self.model.encoder(src, src_lengths)
-                errD_real = self.gan_disc(real_hidden[0])
-                errD_real.backward(self.one)
+            gradient_penalty = self.calc_gradient_penalty(self.gan_disc, real_hidden[0, :, :].data, fake_hidden.data)
+            gradient_penalty.backward()
 
-                z = Variable(torch.Tensor(src.size()[1], 100).normal_(0, 1).cuda())
-                fake_hidden = self.gan_gen(z)
-                errD_fake = self.gan_disc(fake_hidden)
-                errD_fake.backward(self.mone)
+            self.optimizer_gan_d.step()
 
-                gradient_penalty = self.calc_gradient_penalty(self.gan_disc, real_hidden[0].data, fake_hidden.data)
-                gradient_penalty.backward()
-
-                self.optimizer_gan_d.step()
-            return -(errD_real - errD_fake), errD_real, errD_fake
+            errD_reals.append(errD_real)
+            errD_fakes.append(errD_fake)
+            
+                
+        return errD_reals, errD_fakes
 
 
 
     def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats,
                                report_stats):
-        self.optim.zero_grad()
         self.model.train()
 
 
         for k, batch in enumerate(true_batches):
-            target_size = batch.tgt.size(0)
-            # Truncated BPTT: reminder not compatible with accum > 1
-            if self.trunc_size:
-                trunc_size = self.trunc_size
-            else:
-                trunc_size = target_size
 
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                 else (batch.src, None)
-            if src_lengths is not None:
-                report_stats.n_src_words += src_lengths.sum().item()
 
-            tgt_outer = batch.tgt
+            # 2. F-prop all but generator.
+            if self.accum_count == 1:
+                self.optim.zero_grad()
 
-            bptt = False
-            for j in range(0, target_size-1, trunc_size):
-                # 1. Create truncated target.
-                tgt = tgt_outer[j: j + trunc_size]
+            _, real_hidden, _ = self.model.encoder(src, src_lengths, noise=False)
+            #print(real_hidden[0, :, :])
+            #real_hidden.register_hook(grad_hook)
+            errD_real = self.gan_disc(real_hidden[0, :, :])
+            errD_real.backward(self.mone)
+            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
 
-                # 2. F-prop all but generator.
-                if self.accum_count == 1:
-                    self.optim.zero_grad()
-                bptt = True
-
-                _, real_hidden, _ = self.model.encoder(src, src_lengths, noise=False)
-                real_hidden.register_hook(grad_hook)
-                errD_real = self.gan_disc(real_hidden)
-                errD_real.backward(self.mone)
-                #torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
-
-                self.optim.step()
+            self.optim.step()
 
 
     def _gradient_accumulation(self, true_batches, normalization, total_stats,
