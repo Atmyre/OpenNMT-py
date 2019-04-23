@@ -456,7 +456,7 @@ class Trainer(object):
 
 #             print("Real", errD_real.data)
 
-            z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
+            z = Variable(torch.Tensor(src.size()[1], self.gan_gen.ninput).normal_(0, 1).cuda())
             fake_hidden = self.gan_gen(z)
             errD_fake = self.gan_disc(fake_hidden.detach())
             errD_fake.backward(self.mone)
