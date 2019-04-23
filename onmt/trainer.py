@@ -330,7 +330,7 @@ class Trainer(object):
             if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
-                        .format(errG.data.item(), errD.data.item(), errD_real.data.item(), errD_fake.data.item()))
+                        .format(errG[-1].data.item(), errD[-1].data.item(), errD_real[-1].data.item(), errD_fake[-1].data.item()))
 
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
@@ -417,13 +417,13 @@ class Trainer(object):
 
         errGs = []
         for k, batch in enumerate(true_batches):
-            
+
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
                 else (batch.src, None)
-            
+
             if self.accum_count == 1:
                 self.optimizer_gan_g.zero_grad()
-            
+
 
             # 2. F-prop all but generator.
             z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
@@ -439,12 +439,13 @@ class Trainer(object):
 
         errD_reals = []
         errD_fakes = []
-        
+        errDs = []
+
         for k, batch in enumerate(true_batches):
 
             src, src_lengths = batch.src if isinstance(batch.src, tuple) \
-                else (batch.src, None)    
-            
+                else (batch.src, None)
+
             if self.accum_count == 1:
                 self.optimizer_gan_d.zero_grad()
 
@@ -452,14 +453,14 @@ class Trainer(object):
             _, real_hidden, _ = self.model.encoder(src, src_lengths)
             errD_real = self.gan_disc(real_hidden.detach()[0, :, :])
             errD_real.backward(self.one)
-            
+
 #             print("Real", errD_real.data)
 
             z = Variable(torch.Tensor(src.size()[1], 500).normal_(0, 1).cuda())
             fake_hidden = self.gan_gen(z)
             errD_fake = self.gan_disc(fake_hidden.detach())
             errD_fake.backward(self.mone)
-            
+
 #             print("Fake", errD_fake.data)
 
             gradient_penalty = self.calc_gradient_penalty(self.gan_disc, real_hidden[0, :, :].data, fake_hidden.data)
@@ -469,9 +470,9 @@ class Trainer(object):
 
             errD_reals.append(errD_real)
             errD_fakes.append(errD_fake)
-            
-                
-        return errD_reals, errD_fakes
+            errDs.append(errD_fake - errD_real)
+
+        return errDs, errD_reals, errD_fakes
 
 
 
