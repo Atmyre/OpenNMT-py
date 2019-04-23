@@ -82,6 +82,7 @@ def build_decoder(opt, embeddings):
 def build_gan_g(opt):
     return str2gan["gan_g"].from_opt(opt)
 
+
 def build_gan_d(opt):
     return str2gan["gan_d"].from_opt(opt)
 
@@ -104,15 +105,24 @@ def load_test_model(opt, model_path=None):
         fields = vocab
 
     model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
-                             opt.gpu)
+                             opt.gpu, arae_setting=opt.arae)
+    if opt.arae:
+        model, gan_g, gan_d = model
+        gan_g.eval()
+        gan_d.eval()
+
     if opt.fp32:
         model.float()
     model.eval()
     model.generator.eval()
+
+    if opt.arae:
+        model = model, gan_g, gan_d
+
     return fields, model, model_opt
 
 
-def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
+def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False):
     """Build a model from opts.
 
     Args:
@@ -162,11 +172,6 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     elif not gpu:
         device = torch.device("cpu")
     model = onmt.models.NMTModel(encoder, decoder)
-    
-    gan_g = build_gan_g(model_opt)
-    gan_d = build_gan_d(model_opt)
-    gan_g = gan_g.cuda()
-    gan_d = gan_d.cuda()
 
     # Build Generator.
     if not model_opt.copy_attn:
@@ -229,12 +234,20 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     model.to(device)
     if model_opt.model_dtype == 'fp16':
         model.half()
-    
-    return model, gan_g, gan_d
+
+    if arae_setting:
+        gan_g = build_gan_g(model_opt)
+        gan_d = build_gan_d(model_opt)
+
+        gan_g.to(device)
+        gan_d.to(device)
+        model = model, gan_g, gan_d
+
+    return model
 
 
 def build_model(model_opt, opt, fields, checkpoint):
     logger.info('Building model...')
-    model, gan_g, gan_d = build_base_model(model_opt, fields, use_gpu(opt), checkpoint)
+    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint, arae_setting=opt.arae)
     logger.info(model)
-    return model, gan_g, gan_d
+    return model

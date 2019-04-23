@@ -20,8 +20,7 @@ from onmt.utils.logging import logger
 # from onmt.generate import generate_sentences
 
 
-def build_trainer(opt, device_id, model, gan_gen, gan_disc,
-                  fields, optim, optimizer_gan_g, optimizer_gan_d, model_saver=None, gan_saver=None): 
+def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
     """
     Simplify `Trainer` creation based on user `opt`s*
 
@@ -35,6 +34,8 @@ def build_trainer(opt, device_id, model, gan_gen, gan_disc,
         model_saver(:obj:`onmt.models.ModelSaverBase`): the utility object
             used to save the model
     """
+    if opt.arae:
+        model, gan_gen, gan_disc = model
 
     tgt_field = dict(fields)["tgt"].base_field
     train_loss = onmt.utils.loss.build_loss_compute(model, tgt_field, opt)
@@ -61,27 +62,31 @@ def build_trainer(opt, device_id, model, gan_gen, gan_disc,
         if opt.early_stopping > 0 else None
 
     report_manager = onmt.utils.build_report_manager(opt)
-    trainer = onmt.Trainer(model, gan_gen, gan_disc, train_loss, valid_loss,
-                           optim, optimizer_gan_g, optimizer_gan_d,
-                           opt.niters_ae, opt.niters_gan_g, opt.niters_gan_d, opt.niters_gan_ae,
-                           trunc_size,
+
+    if opt.arae:
+        model = model, gan_gen, gan_disc
+    trainer = onmt.Trainer(model, train_loss, valid_loss, optim, trunc_size,
                            shard_size, norm_method,
                            accum_count, accum_steps,
                            n_gpu, gpu_rank,
                            gpu_verbose_level, report_manager,
                            model_saver=model_saver if gpu_rank == 0 else None,
-                           gan_saver=gan_saver if gpu_rank == 0 else None,
                            average_decay=average_decay,
                            average_every=average_every,
                            model_dtype=opt.model_dtype,
-                           earlystopper=earlystopper)
+                           earlystopper=earlystopper,
+                           arae_setting=opt.arae,
+                           niters_ae=opt.niters_ae,
+                           niters_gan_g=opt.niters_gan_g,
+                           niters_gan_d=opt.niters_gan_d,
+                           niters_gan_ae=opt.niters_gan_ae)
     return trainer
 
 
 def grad_hook(grad):
     #gan_norm = torch.norm(grad, p=2, dim=1).detach().data.mean()
-    #print(gan_norm, autoencoder.grad_norm)
     return grad * 0.1
+
 
 class Trainer(object):
     """
@@ -109,25 +114,50 @@ class Trainer(object):
                 Thus nothing will be saved if this parameter is None
     """
 
-    def __init__(self, model, gan_gen, gan_disc, train_loss, valid_loss,
-                 optim, optimizer_gan_g, optimizer_gan_d,
-                 niters_ae=1, niters_gan_g=1, niters_gan_d=1, niters_gan_ae=1,
+    def __init__(self, model, train_loss, valid_loss, optim,
                  trunc_size=0, shard_size=32,
                  norm_method="sents", accum_count=[1],
                  accum_steps=[0],
                  n_gpu=1, gpu_rank=1,
-                 gpu_verbose_level=0, report_manager=None, model_saver=None, gan_saver=None,
+                 gpu_verbose_level=0, report_manager=None, model_saver=None,
                  average_decay=0, average_every=1, model_dtype='fp32',
-                 earlystopper=None, batch_size=4096):
+                 earlystopper=None,
+                 arae_setting=False,
+                 niters_ae=1, niters_gan_g=1, niters_gan_d=1, niters_gan_ae=1,
+                 batch_size=4096):
+        self.arae_setting = arae_setting
+        if arae_setting:
+
+            model, gan_gen, gan_disc = model
+            optim, optimizer_gan_g, optimizer_gan_d = optim
+            model_saver, gan_saver = model_saver
+
+            self.gan_gen = gan_gen
+            self.gan_disc = gan_disc
+            self.optimizer_gan_g = optimizer_gan_g
+            self.optimizer_gan_d = optimizer_gan_d
+
+            self.batch_size = batch_size
+
+            self.niters_ae = niters_ae
+            self.niters_gan_g = niters_gan_g
+            self.niters_gan_d = niters_gan_d
+            self.niters_gan_ae = niters_gan_ae
+
+            self.gan_saver = gan_saver
+
+            device = torch.device("cuda" if n_gpu > 0 else "cpu")
+            self.one = torch.Tensor(1).fill_(1).to(device)
+            self.mone = self.one * -1
+
+            gan_gen.train()
+            gan_disc.train()
+
         # Basic attributes.
         self.model = model
-        self.gan_gen = gan_gen
-        self.gan_disc = gan_disc
         self.train_loss = train_loss
         self.valid_loss = valid_loss
         self.optim = optim
-        self.optimizer_gan_g = optimizer_gan_g
-        self.optimizer_gan_d = optimizer_gan_d
         self.trunc_size = trunc_size
         self.shard_size = shard_size
         self.norm_method = norm_method
@@ -139,21 +169,12 @@ class Trainer(object):
         self.gpu_verbose_level = gpu_verbose_level
         self.report_manager = report_manager
         self.model_saver = model_saver
-        self.gan_saver = gan_saver
         self.average_decay = average_decay
         self.moving_average = None
         self.average_every = average_every
         self.model_dtype = model_dtype
         self.earlystopper = earlystopper
-        self.batch_size=batch_size
 
-        self.niters_ae = niters_ae
-        self.niters_gan_g = niters_gan_g
-        self.niters_gan_d = niters_gan_d
-        self.niters_gan_ae = niters_gan_ae
-
-        self.one = torch.Tensor(1).fill_(1).cuda()
-        self.mone = self.one * -1
 
         for i in range(len(self.accum_count_l)):
             assert self.accum_count_l[i] > 0
@@ -164,6 +185,7 @@ class Trainer(object):
 
         # Set model in training mode.
         self.model.train()
+
 
     def _accum_count(self, step):
         for i in range(len(self.accum_steps)):
@@ -245,7 +267,6 @@ class Trainer(object):
         Returns:
             The gathered statistics.
         """
-        last_valid_step = 0
         if valid_iter is None:
             logger.info('Start training loop without validation...')
         else:
@@ -263,6 +284,12 @@ class Trainer(object):
         for i, (batches, normalization) in enumerate(
                 self._accum_batches(train_iter)):
             step = self.optim.training_step
+
+            if self.arae_setting:  # fix step for arae setting
+                ac_gae_steps = 0
+                if i > 0:
+                    ac_gae_steps = (i-1) // self.niters_ae + 1
+                step -= self.niters_gan_ae * ac_gae_steps + 1
 
             if self.gpu_verbose_level > 1:
                 logger.info("GpuRank %d: index: %d", self.gpu_rank, i)
@@ -288,22 +315,23 @@ class Trainer(object):
                 self.optim.learning_rate(),
                 report_stats)
 
-            if i % self.niters_ae == 0:
-                for k in range(1):
-                    for i in range(self.niters_gan_d):
-                        errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
-                                                                                   total_stats, report_stats)
-                    for i in range(self.niters_gan_ae):
-                        self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
-                    for i in range(self.niters_gan_g):
-                        errG = self._gradient_accumulation_g(batches, normalization,
-                                                             total_stats, report_stats)
+            if self.arae_setting:
 
-                    # print("GAN", errG.data.item(), errD.data.item(),
-                    #       errD_real.data.item(), errD_fake.data.item())
+                if i % self.niters_ae == 0:
+                    for k in range(1):
+                        for i in range(self.niters_gan_d):
+                            errD, errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
+                                                                                       total_stats, report_stats)
+                        for i in range(self.niters_gan_ae):
+                            self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
+                        for i in range(self.niters_gan_g):
+                            errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
 
-            if valid_iter is not None and step - last_valid_step >= valid_steps:
-                last_valid_step = step
+            if valid_iter is not None and step % valid_steps == 0:
+                if self.arae_setting:
+                    print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
+                        .format(errG.data.item(), errD.data.item(), errD_real.data.item(), errD_fake.data.item()))
+
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
                                 % (self.gpu_rank, step))
@@ -329,14 +357,16 @@ class Trainer(object):
                 and (save_checkpoint_steps != 0
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
-                self.gan_saver.save(step, moving_average=self.moving_average)
+                if self.arae_setting:
+                    self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
                 break
 
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
-            self.gan_saver.save(step, moving_average=self.moving_average)
+            if self.arae_setting:
+                self.gan_saver.save(step, moving_average=self.moving_average)
         return total_stats
 
     def validate(self, valid_iter, moving_average=None):
@@ -382,8 +412,7 @@ class Trainer(object):
 
         return stats
 
-    def _gradient_accumulation_g(self, true_batches, normalization, total_stats,
-                               report_stats):
+    def _gradient_accumulation_g(self, true_batches, normalization, total_stats, report_stats):
         self.gan_gen.train()
 
         errGs = []
@@ -405,8 +434,7 @@ class Trainer(object):
             errGs.append(errG)
         return errGs
 
-    def _gradient_accumulation_d(self, true_batches, normalization, total_stats,
-                               report_stats):
+    def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
         self.gan_disc.train()
 
         errD_reals = []
@@ -447,8 +475,8 @@ class Trainer(object):
 
 
 
-    def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats,
-                               report_stats):
+    def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
+        self.optim.zero_grad()
         self.model.train()
 
 

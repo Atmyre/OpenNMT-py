@@ -83,8 +83,10 @@ def main(opt, device_id):
                 logger.info(' * %s vocab size = %d' % (sn, len(sf.vocab)))
 
     # Build model.
-    model, gan_g, gan_d = build_model(model_opt, opt, fields, checkpoint)
-    
+    model = build_model(model_opt, opt, fields, checkpoint)
+    if opt.arae:
+        model, gan_g, gan_d = model
+
     n_params, enc, dec = _tally_parameters(model)
     logger.info('encoder: %d' % enc)
     logger.info('decoder: %d' % dec)
@@ -93,19 +95,26 @@ def main(opt, device_id):
 
     # Build optimizer.
     optim = Optimizer.from_opt(model, opt, checkpoint=checkpoint)
-    optim_g = torch.optim.Adam(gan_g.parameters(),
-                         lr=opt.lr_gan_g,
-                         betas=(opt.beta1, 0.999))
-    optim_d = torch.optim.Adam(gan_d.parameters(),
-                         lr=opt.lr_gan_d,
-                         betas=(opt.beta1, 0.999))
+    if opt.arae:
+        optim_g = torch.optim.Adam(gan_g.parameters(),
+                                   lr=opt.lr_gan_g,
+                                   betas=(opt.beta1, 0.999))
+        optim_d = torch.optim.Adam(gan_d.parameters(),
+                                   lr=opt.lr_gan_d,
+                                   betas=(opt.beta1, 0.999))
 
     # Build model saver
     model_saver = build_model_saver(model_opt, opt, model, fields, optim)
-    gan_saver = build_gan_saver(model_opt, opt, gan_g, gan_d, fields, optim_g, optim_d)
+    if opt.arae:
+        gan_saver = build_gan_saver(model_opt, opt, gan_g, gan_d, fields, optim_g, optim_d)
+
+    if opt.arae:
+        model = [model, gan_g, gan_d]
+        optim = [optim, optim_g, optim_d]
+        model_saver = [model_saver, gan_saver]
 
     trainer = build_trainer(
-        opt, device_id, model, gan_g, gan_d, fields, optim, optim_g, optim_d, model_saver=model_saver, gan_saver=gan_saver)
+        opt, device_id, model, fields, optim, model_saver=model_saver)
 
     train_iter = build_dataset_iter("train", fields, opt)
     valid_iter = build_dataset_iter(

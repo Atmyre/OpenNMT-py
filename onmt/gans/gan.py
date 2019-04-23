@@ -37,8 +37,8 @@ class MLP_D(nn.Module):
         layer = nn.Linear(layer_sizes[-1], noutput)
         self.layers.append(layer)
         self.add_module("layer"+str(len(self.layers)), layer)
-        self.layers.append(nn.Sigmoid())
-        self.add_module("activation"+str(len(self.layers)), activation)
+#         self.layers.append(nn.Sigmoid())
+#         self.add_module("activation"+str(len(self.layers)), activation)
 
         self.init_weights()
         

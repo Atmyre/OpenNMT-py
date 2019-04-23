@@ -21,7 +21,7 @@ class AttentionPooling(nn.Module):
             nn.Linear(attn_size, 1),
         )
         self.softmax = nn.Softmax(dim=-1)
-        
+
     def forward(self, inp, mask=None):
         logits = self.logits(inp)[:, :, 0]
         if mask is not None:
@@ -104,11 +104,12 @@ class TransformerEncoder(EncoderBase):
         * memory_bank ``(src_len, batch_size, model_dim)``
     """
 
-    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings, noise_r,
-                 max_relative_positions):
+    def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings,
+                 max_relative_positions, arae_setting=False, noise_r=0):
         super(TransformerEncoder, self).__init__()
 
-        self.noise_r = noise_r
+        self.arae_setting = arae_setting
+        self.noise_r = noise_r # arae param
 
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
@@ -117,7 +118,8 @@ class TransformerEncoder(EncoderBase):
                 max_relative_positions=max_relative_positions)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
-        self.attention_pooling = AttentionPooling(d_model, d_model)
+        if arae_setting:
+            self.attention_pooling = AttentionPooling(d_model, d_model)
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -129,10 +131,10 @@ class TransformerEncoder(EncoderBase):
             opt.transformer_ff,
             opt.dropout,
             embeddings,
-            opt.noise_r,
-            opt.max_relative_positions)
+            opt.max_relative_positions,
+            opt.arae, opt.noise_r)
 
-    def forward(self, src, lengths=None, noise=True):
+    def forward(self, src, lengths=None, noise=False):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
 
@@ -148,25 +150,20 @@ class TransformerEncoder(EncoderBase):
             out = layer(out, mask)
         out = self.layer_norm(out)
 
-        out1 = torch.zeros_like(out)
-        out1[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
-        out = out1.transpose(0, 1)
-        a = torch.zeros(emb.size()).cuda()
-        a[0] = 1.
-        
-#         print("OUT", out)
-#         print("NORM", torch.norm(out, p=2, dim=1, keepdim=True))
-        x = out[0] / torch.norm(out[0], p=2, dim=1, keepdim=True)
-        y = torch.zeros_like(out)
-        y[0] = x
-        out = y
-        
+        if not self.arae_setting:
+            return emb, out.transpose(0, 1).contiguous(), lengths
+
+        device = out.device
         if noise and self.noise_r > 0:
             gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
-            #print(self.noise_r, torch.zeros(hidden.size()).shape)
-            #print(torch.normal(means=torch.zeros(hidden.size()), std=self.noise_r))
-            out = out + gauss_noise.cuda()
-        return emb, out.contiguous() * a, lengths
+            out = out + gauss_noise.to(device)
+
+        out_new = torch.zeros_like(out)
+        out_new[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
+        out = out_new.transpose(0, 1)
+        token_mask = torch.zeros_like(emb).to(device)
+        token_mask[0] = 1.
+        return emb, out.contiguous() * token_mask, lengths
 
 
 
