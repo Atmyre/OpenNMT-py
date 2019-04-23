@@ -69,7 +69,7 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            accum_count, accum_steps,
                            n_gpu, gpu_rank,
                            gpu_verbose_level, report_manager,
-                           model_saver=model_saver if gpu_rank == 0 else None,
+                           model_saver=model_saver,
                            average_decay=average_decay,
                            average_every=average_every,
                            model_dtype=opt.model_dtype,
@@ -431,7 +431,7 @@ class Trainer(object):
             errG = self.gan_disc(fake_hidden)
             errG.backward(self.one)
             self.optimizer_gan_g.step()
-            errGs.append(errG)
+            errGs.append(errG.data.item())
         return errGs
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
@@ -467,7 +467,7 @@ class Trainer(object):
             gradient_penalty.backward()
 
             self.optimizer_gan_d.step()
-
+            
             errD_reals.append(errD_real)
             errD_fakes.append(errD_fake)
             errDs.append(errD_fake - errD_real)
