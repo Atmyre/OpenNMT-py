@@ -69,7 +69,7 @@ class TextGenerator(object):
         self.model.decoder.init_state(None, memory_bank, None)
 
         BOS = 2  # hardcoded
-        reconstruct_seq = torch.full([batch_size, 1], 2, dtype=torch.long, device=self.device)
+        reconstruct_seq = torch.full([batch_size, 1], BOS, dtype=torch.long, device=self.device)
 
         for step in range(self.max_length):
             decoder_in = reconstruct_seq[:, -1].view(1, -1, 1)  # (1, B, 1)
