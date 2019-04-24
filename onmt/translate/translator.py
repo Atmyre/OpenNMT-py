@@ -428,6 +428,7 @@ class Translator(object):
 
         # Encoder forward.
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
+
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         use_src_map = self.copy_attn

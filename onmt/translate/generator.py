@@ -33,6 +33,21 @@ def build_generator(opt):
     return generator
 
 
+def sample_next_idxs(log_probs):
+    ARG_MAX = True
+
+    if ARG_MAX:
+        return torch.argmax(log_probs, dim=1, keepdim=True)
+
+    sampling_temp = 1.5
+    log_probs = torch.div(log_probs, sampling_temp)
+
+    dist = torch.distributions.Multinomial(logits=log_probs, total_count=1)
+    topk_ids = torch.argmax(dist.sample(), dim=1, keepdim=True)
+
+    return topk_ids
+
+
 class TextGenerator(object):
     def __init__(self, model, gan_g, gan_d, fields, max_length, gpu):
         self._gpu = gpu
@@ -63,7 +78,6 @@ class TextGenerator(object):
         z_hidden_size = self.gan_g.ninput
         noise = torch.Tensor(n_sents, z_hidden_size).normal_(0, 1).to(self.device)
         fake_hidden = self.gan_g(noise)
-        print(fake_hidden)
 
         memory_bank = torch.zeros(25, n_sents, 512)  # 25 is an avg length of sent, 512 - internal repr
         memory_bank[0] = fake_hidden
@@ -79,10 +93,9 @@ class TextGenerator(object):
 
             # copy_attn is OFF
             attn = attns.get('std', None)
-            log_probs = self.model.generator(dec_out.squeeze(0))
 
-            # log_probs, attn
-            next_ids = torch.argmax(log_probs, dim=1, keepdim=True)
+            log_probs = self.model.generator(dec_out.squeeze(0))
+            next_ids = sample_next_idxs(log_probs)
 
             reconstruct_seq = torch.cat([reconstruct_seq, next_ids], -1)
 

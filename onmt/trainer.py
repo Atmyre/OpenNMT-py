@@ -489,8 +489,10 @@ class Trainer(object):
 
 
     def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
-        self.optim.zero_grad()
         self.model.train()
+
+        if self.accum_count > 1:
+            self.optim.zero_grad()
 
         for k, batch in enumerate(true_batches):
 
@@ -506,7 +508,7 @@ class Trainer(object):
             Z_vec.register_hook(grad_hook)
             errD_real = self.gan_disc(Z_vec)
             errD_real.backward(self.mone)
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
+            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
 
         self.optim.step()
 
