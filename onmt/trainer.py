@@ -315,7 +315,7 @@ class Trainer(object):
                 report_stats)
 
             if self.arae_setting:
-
+            #if False:
                 if i % self.niters_ae == 0:
                     for k in range(1):
                         for i in range(self.niters_gan_d):
@@ -328,6 +328,7 @@ class Trainer(object):
 
             if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
+                #if False:
                     print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
                         .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
 
@@ -357,6 +358,7 @@ class Trainer(object):
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
                 if self.arae_setting:
+                #if False:
                     self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
@@ -365,6 +367,7 @@ class Trainer(object):
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
             if self.arae_setting:
+            #if False:
                 self.gan_saver.save(step, moving_average=self.moving_average)
         return total_stats
 
@@ -413,6 +416,8 @@ class Trainer(object):
 
     def _gradient_accumulation_g(self, true_batches, normalization, total_stats, report_stats):
         self.gan_gen.train()
+        if self.accum_count > 1:
+            self.optimizer_gan_g.zero_grad()
 
         errGs = []
         for k, batch in enumerate(true_batches):
@@ -423,19 +428,24 @@ class Trainer(object):
             if self.accum_count == 1:
                 self.optimizer_gan_g.zero_grad()
 
-
             # 2. F-prop all but generator.
-            z_hidden_size = self.gan_gen.ninput
-            z = Variable(torch.Tensor(src.size()[1], z_hidden_size).normal_(0, 1).cuda())
+            z_hidden_size, batch_size = self.gan_gen.ninput, src.size(1)
+            z = Variable(torch.Tensor(batch_size, z_hidden_size).normal_(0, 1).cuda())
             fake_hidden = self.gan_gen(z)
             errG = self.gan_disc(fake_hidden)
             errG.backward(self.one)
-            self.optimizer_gan_g.step()
             errGs.append(errG.data.item())
+
+        self.optimizer_gan_g.step()
+
         return errGs
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
         self.gan_disc.train()
+        self.model.eval()
+
+        if self.accum_count > 1:
+            self.optimizer_gan_d.zero_grad()
 
         errD_reals = []
         errD_fakes = []
@@ -450,27 +460,29 @@ class Trainer(object):
                 self.optimizer_gan_d.zero_grad()
 
             # 2. F-prop all but generator.
-            _, real_hidden, _ = self.model.encoder(src, src_lengths)
-            errD_real = self.gan_disc(real_hidden.detach()[0, :, :])
+            with torch.no_grad():
+                _, real_hidden, _ = self.model.encoder(src, src_lengths)
+            Z_vec = real_hidden[0]   # (batch_size, model_dim)
+            errD_real = self.gan_disc(Z_vec.detach())
             errD_real.backward(self.one)
 
-#             print("Real", errD_real.data)
-
-            z = Variable(torch.Tensor(src.size()[1], self.gan_gen.ninput).normal_(0, 1).cuda())
+            batch_size = real_hidden.size(1)
+            z = Variable(torch.Tensor(batch_size, self.gan_gen.ninput).normal_(0, 1).cuda())
             fake_hidden = self.gan_gen(z)
             errD_fake = self.gan_disc(fake_hidden.detach())
             errD_fake.backward(self.mone)
 
-#             print("Fake", errD_fake.data)
-
-            gradient_penalty = self.calc_gradient_penalty(self.gan_disc, real_hidden[0, :, :].data, fake_hidden.data)
+            gradient_penalty = self.calc_gradient_penalty(self.gan_disc, Z_vec.data, fake_hidden.data)
             gradient_penalty.backward()
 
-            self.optimizer_gan_d.step()
 
             errD_reals.append(errD_real)
             errD_fakes.append(errD_fake)
             errDs.append(errD_fake - errD_real)
+
+        self.optimizer_gan_d.step()
+
+        self.model.train()
 
         return errDs, errD_reals, errD_fakes
 
@@ -479,7 +491,6 @@ class Trainer(object):
     def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
         self.optim.zero_grad()
         self.model.train()
-
 
         for k, batch in enumerate(true_batches):
 
@@ -491,13 +502,13 @@ class Trainer(object):
                 self.optim.zero_grad()
 
             _, real_hidden, _ = self.model.encoder(src, src_lengths, noise=False)
-            #print(real_hidden[0, :, :])
-            #real_hidden.register_hook(grad_hook)
-            errD_real = self.gan_disc(real_hidden[0, :, :])
+            Z_vec = real_hidden[0]
+            Z_vec.register_hook(grad_hook)
+            errD_real = self.gan_disc(Z_vec)
             errD_real.backward(self.mone)
-            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
 
-            self.optim.step()
+        self.optim.step()
 
 
     def _gradient_accumulation(self, true_batches, normalization, total_stats,
@@ -528,7 +539,7 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.accum_count == 1:
                     self.optim.zero_grad()
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt)
+                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt, noise=True)
                 bptt = True
 
                 # 3. Compute loss.

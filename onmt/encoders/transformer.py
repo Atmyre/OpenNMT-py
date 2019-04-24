@@ -11,6 +11,7 @@ from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
 
+
 class AttentionPooling(nn.Module):
     def __init__(self, enc_size, attn_size, dropout_rate=0.0):
         super().__init__()
@@ -158,16 +159,14 @@ class TransformerEncoder(EncoderBase):
             gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
             out = out + gauss_noise.to(device)
 
-        out_new = torch.zeros_like(out)
+        #out_new = torch.zeros_like(out)
         # comment for a while
         #out_new[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
-        out = out_new.transpose(0, 1)
+        #out = out_new.transpose(0, 1)
+        out = out.transpose(0, 1)
+
         token_mask = torch.zeros_like(out).to(device)
         token_mask[0] = 1.
+        # size: (src_len, batch_size, model_dim)
         return emb, out.contiguous() * token_mask, lengths
-
-
-
-
-
 

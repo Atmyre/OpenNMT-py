@@ -48,21 +48,22 @@ class TextGenerator(object):
         self.tgt_field = dict(self.fields)["tgt"].base_field
         self.tgt_vocab = self.tgt_field.vocab
 
-        #a = self.tgt_vocab
-        #print(a.itos[2], a.itos[10], a.itos[25])
 
     @classmethod
     def from_opt(cls, model, gan_g, gan_d, fields, opt):
-        #src_reader = inputters.str2reader[opt.data_type].from_opt(opt)
-        #tgt_reader = inputters.str2reader["text"].from_opt(opt)
         return cls(model, gan_g, gan_d, fields, opt.max_length, gpu=opt.gpu)
 
     def generate(self, n_sents):
+        with torch.no_grad():
+            return self._generate(n_sents)
+
+    def _generate(self, n_sents):
         batch_size = n_sents
         # get Z
         z_hidden_size = self.gan_g.ninput
         noise = torch.Tensor(n_sents, z_hidden_size).normal_(0, 1).to(self.device)
         fake_hidden = self.gan_g(noise)
+        print(fake_hidden)
 
         memory_bank = torch.zeros(25, n_sents, 512)  # 25 is an avg length of sent, 512 - internal repr
         memory_bank[0] = fake_hidden

@@ -72,7 +72,7 @@ class MLP_G(nn.Module):
         self.ninput = ninput
         self.noutput = noutput
 
-        layer_sizes = [ninput] + [int(x) for x in layers.split('-')]
+        layer_sizes = [ninput] + [int(x) for x in layers.split('-')]  # 100, 300, 300
         self.layers = []
 
         for i in range(len(layer_sizes)-1):
@@ -80,9 +80,9 @@ class MLP_G(nn.Module):
             self.layers.append(layer)
             self.add_module("layer"+str(i+1), layer)
 
-#             bn = nn.BatchNorm1d(layer_sizes[i+1], eps=1e-05, momentum=0.1)
-#             self.layers.append(bn)
-#             self.add_module("bn"+str(i+1), bn)
+            bn = nn.BatchNorm1d(layer_sizes[i+1], eps=1e-05, momentum=0.1)
+            self.layers.append(bn)
+            self.add_module("bn"+str(i+1), bn)
 
             self.layers.append(activation)
             self.add_module("activation"+str(i+1), activation)
@@ -114,3 +114,4 @@ class MLP_G(nn.Module):
                 layer.bias.data.fill_(0)
             except:
                 pass
+
