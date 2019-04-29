@@ -27,3 +27,9 @@ GENERATE:
 ```console
 python3.6 generate.py -model data_autoenc/model_step_17000.pt -model_arae data_autoenc/gan_step_17000.pt -src data_snli/src-val.txt -output pred.txt -arae
 ```
+
+ADVICE FOR RUNNING TRAINING (with tee):
+
+```console
+CUDA_VISIBLE_DEVICES=4 sh_scripts/run_train.sh > >(tee stdout.log) 2> >(tee stderr.log >&2)
+```
