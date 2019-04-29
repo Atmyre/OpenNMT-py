@@ -2,6 +2,7 @@
 This file is for models creation, which consults options
 and creates each encoder and decoder accordingly.
 """
+import os
 import re
 import torch
 import torch.nn as nn
@@ -242,9 +243,9 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_
 
         if arae_model_path is not None:
             if not os.path.exists(arae_model_path):
-                print("Can't load arae model from {}".format(arae_model_path))
+                logger.warning("Can't load arae model from {}".format(arae_model_path))
             else:
-                print('Loading arae model from: {}'.format(arae_model_path))
+                logger.info('Loading arae model from: {}'.format(arae_model_path))
                 loaded = torch.load(arae_model_path, map_location=lambda storage, loc: storage)
                 gan_g.load_state_dict(loaded.get('gen'))
                 gan_d.load_state_dict(loaded.get('desc'))
@@ -258,6 +259,7 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_
 
 def build_model(model_opt, opt, fields, checkpoint):
     logger.info('Building model...')
-    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint, arae_setting=opt.arae)
+    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint, arae_setting=opt.arae,
+                             arae_model_path=opt.model_arae)
     logger.info(model)
     return model

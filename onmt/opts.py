@@ -386,6 +386,8 @@ def train_opts(parser):
     group.add('--train_from', '-train_from', default='', type=str,
               help="If training from a checkpoint then this is the "
                    "path to the pretrained model's state_dict.")
+    group.add('--model_arae', '-model_arae', type=str, required=False, default=None,
+              help='Path to arae model .pt file')
     group.add('--reset_optim', '-reset_optim', default='none',
               choices=['none', 'all', 'states', 'keep_states'],
               help="Optimization resetter when train_from.")
