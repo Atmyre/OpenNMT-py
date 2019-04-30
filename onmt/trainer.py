@@ -285,10 +285,11 @@ class Trainer(object):
             step = self.optim.training_step
 
             if self.arae_setting:  # fix step for arae setting
-                ac_gae_steps = 0
+                delta = 0
                 if i > 0:
                     ac_gae_steps = (i-1) // self.niters_ae + 1
-                step -= self.niters_gan_ae * ac_gae_steps + 1
+                    delta = self.niters_gan_ae * ac_gae_steps + 1
+                step -= delta
 
             if self.gpu_verbose_level > 1:
                 logger.info("GpuRank %d: index: %d", self.gpu_rank, i)
@@ -485,7 +486,6 @@ class Trainer(object):
         self.model.train()
 
         return errDs, errD_reals, errD_fakes
-
 
 
     def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
