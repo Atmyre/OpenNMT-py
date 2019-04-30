@@ -1,7 +1,5 @@
 """Define a minimal encoder."""
 from onmt.encoders.encoder import EncoderBase
-from onmt.utils.misc import sequence_mask
-import torch
 
 
 class MeanEncoder(EncoderBase):
@@ -31,7 +29,7 @@ class MeanEncoder(EncoderBase):
         emb = self.embeddings(src)
         _, batch, emb_dim = emb.size()
 
-        if lengths is not None:
+        if length is not None:
             # we avoid padding while mean pooling
             mask = sequence_mask(lengths).float()
             mask = mask / lengths.unsqueeze(1).float()
@@ -43,3 +41,4 @@ class MeanEncoder(EncoderBase):
         memory_bank = emb
         encoder_final = (mean, mean)
         return encoder_final, memory_bank, lengths
+

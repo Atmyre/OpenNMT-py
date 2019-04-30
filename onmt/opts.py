@@ -11,6 +11,8 @@ def config_opts(parser):
     parser.add('-save_config', '--save_config', required=False,
                is_write_out_config_file_arg=True,
                help='config file save path')
+    parser.add('-arae', '--arae', action='store_true',
+                help='add arae setting')
 
 
 def model_opts(parser):
@@ -96,6 +98,33 @@ def model_opts(parser):
               help="Size of decoder rnn hidden states. "
                    "Must be equal to enc_rnn_size except for "
                    "speech-to-text.")
+    # ARAE Options
+    group.add('--noise_r', '-noise_r', type=float, default=0.05,
+                    help='stdev of noise for autoencoder (regularizer)')
+    group.add('--niters_gan_d', '-niters_gan_d', type=int, default=5,
+                    help='number of discriminator iterations in training')
+    group.add('--niters_gan_g', '-niters_gan_g', type=int, default=1,
+                    help='number of generator iterations in training')
+    group.add('--niters_gan_ae', '-niters_gan_ae', type=int, default=1,
+                    help='number of gan-into-ae iterations in training')
+    group.add('--lr_ae', '-lr_ae', type=float, default=1,
+                    help='autoencoder learning rate')
+    group.add('--lr_gan_g', '-lr_gan_g', type=float, default=1e-04,
+                    help='generator learning rate')
+    group.add('--lr_gan_d', '-lr_gan_d', type=float, default=1e-04,
+                    help='critic/discriminator learning rate')
+    group.add('--beta1', '-beta1', type=float, default=0.5,
+                    help='beta1 for adam. default=0.5')
+    group.add('--gen_input', '-gen_input', type=int, default=100,
+                    help='dimension of random noise z to feed into generator')
+    group.add('--gen_layers', '-gen_layers', type=str, default='300-300',
+                    help='generator architecture (MLP)')
+    group.add('--desc_layers', '-desc_layers', type=str, default='300-300',
+                    help='critic/discriminator architecture (MLP)')
+    group.add('--niters_ae', '-niters_ae', type=int, default=3,
+                    help='number of autoencoder iterations in training')
+
+
     group.add('--audio_enc_pooling', '-audio_enc_pooling',
               type=str, default='1',
               help="The amount of pooling of audio encoder, "
@@ -312,6 +341,10 @@ def train_opts(parser):
               help="Model filename (the model will be saved as "
                    "<save_model>_N.pt where N is the number "
                    "of steps")
+    group.add('--save_gan', '-save_gan', default='gan',
+              help="GAM filename (the model will be saved as "
+                   "<save_gan>_N.pt where N is the number "
+                   "of steps")
 
     group.add('--save_checkpoint_steps', '-save_checkpoint_steps',
               type=int, default=5000,
@@ -353,6 +386,8 @@ def train_opts(parser):
     group.add('--train_from', '-train_from', default='', type=str,
               help="If training from a checkpoint then this is the "
                    "path to the pretrained model's state_dict.")
+    group.add('--model_arae', '-model_arae', type=str, required=False, default=None,
+              help='Path to arae model .pt file')
     group.add('--reset_optim', '-reset_optim', default='none',
               choices=['none', 'all', 'states', 'keep_states'],
               help="Optimization resetter when train_from.")
@@ -536,6 +571,8 @@ def translate_opts(parser):
               help="Path to model .pt file(s). "
                    "Multiple models can be specified, "
                    "for ensemble decoding.")
+    group.add('--model_arae', '-model_arae', type=str, required=False, default=None,
+              help='Path to arae model .pt file')
     group.add('--fp32', '-fp32', action='store_true',
               help="Force the model to be in FP32 "
                    "because FP16 is very slow on GTX1080(ti).")

@@ -97,6 +97,10 @@ class ArgumentParser(cfargparse.ArgumentParser):
             raise ValueError('Can either do beam search OR random sampling.')
 
     @classmethod
+    def validate_generate_opts(cls, opt):
+        pass
+
+    @classmethod
     def validate_preprocess_args(cls, opt):
         assert opt.max_shard_size == 0, \
             "-max_shard_size is deprecated. Please use \

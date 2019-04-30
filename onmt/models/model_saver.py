@@ -18,6 +18,15 @@ def build_model_saver(model_opt, opt, model, fields, optim):
     return model_saver
 
 
+def build_gan_saver(model_opt, opt, gen, desc, fields, gen_optim, desc_optim):
+    model_saver = GANSaver(opt.save_gan,
+                             gen, desc,
+                             model_opt,
+                             fields,
+                             gen_optim, desc_optim,
+                             opt.keep_checkpoint)
+    return model_saver
+
 class ModelSaverBase(object):
     """Base class for model saving operations
 
@@ -114,6 +123,44 @@ class ModelSaver(ModelSaverBase):
             'vocab': self.fields,
             'opt': self.model_opt,
             'optim': self.optim.state_dict(),
+        }
+
+        logger.info("Saving checkpoint %s_step_%d.pt" % (self.base_path, step))
+        checkpoint_path = '%s_step_%d.pt' % (self.base_path, step)
+        torch.save(checkpoint, checkpoint_path)
+        return checkpoint, checkpoint_path
+
+    def _rm_checkpoint(self, name):
+        os.remove(name)
+        
+        
+class GANSaver:
+    """Simple model saver to filesystem"""
+    
+    def __init__(self, base_path, gen, desc, model_opt, fields, gen_optim, desc_optim,
+                 keep_checkpoint=-1):
+        self.base_path = base_path
+        self.gen = gen
+        self.desc = desc
+        self.model_opt = model_opt
+        self.fields = fields
+        self.gen_optim = gen_optim
+        self.desc_optim = desc_optim
+        self.last_saved_step = None
+        self.keep_checkpoint = keep_checkpoint
+        if keep_checkpoint > 0:
+            self.checkpoint_queue = deque([], maxlen=keep_checkpoint)
+
+    def save(self, step, moving_average=None):
+
+        gen_state_dict = self.gen.state_dict()
+        desc_state_dict = self.desc.state_dict()
+        checkpoint = {
+            'gen': gen_state_dict,
+            'desc': desc_state_dict,
+            'opt': self.model_opt,
+            'gen_optim': self.gen_optim.state_dict(),
+            'desc_optim': self.desc_optim.state_dict(),
         }
 
         logger.info("Saving checkpoint %s_step_%d.pt" % (self.base_path, step))

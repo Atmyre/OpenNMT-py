@@ -2,6 +2,7 @@
 This file is for models creation, which consults options
 and creates each encoder and decoder accordingly.
 """
+import os
 import re
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ import onmt.modules
 from onmt.encoders import str2enc
 
 from onmt.decoders import str2dec
+from onmt.gans import str2gan
 
 from onmt.modules import Embeddings, CopyGenerator
 from onmt.modules.util_class import Cast
@@ -78,6 +80,14 @@ def build_decoder(opt, embeddings):
     return str2dec[dec_type].from_opt(opt, embeddings)
 
 
+def build_gan_g(opt):
+    return str2gan["gan_g"].from_opt(opt)
+
+
+def build_gan_d(opt):
+    return str2gan["gan_d"].from_opt(opt)
+
+
 def load_test_model(opt, model_path=None):
     if model_path is None:
         model_path = opt.models[0]
@@ -95,16 +105,26 @@ def load_test_model(opt, model_path=None):
     else:
         fields = vocab
 
+    arae_model_path = opt.model_arae if opt.arae and checkpoint else None
     model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint,
-                             opt.gpu)
+                             opt.gpu, arae_setting=opt.arae, arae_model_path=arae_model_path)
+    if opt.arae:
+        model, gan_g, gan_d = model
+        gan_g.eval()
+        gan_d.eval()
+
     if opt.fp32:
         model.float()
     model.eval()
     model.generator.eval()
+
+    if opt.arae:
+        model = model, gan_g, gan_d
+
     return fields, model, model_opt
 
 
-def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
+def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None, arae_setting=False, arae_model_path=None):
     """Build a model from opts.
 
     Args:
@@ -217,11 +237,29 @@ def build_base_model(model_opt, fields, gpu, checkpoint=None, gpu_id=None):
     if model_opt.model_dtype == 'fp16':
         model.half()
 
+    if arae_setting:
+        gan_g = build_gan_g(model_opt)
+        gan_d = build_gan_d(model_opt)
+
+        if arae_model_path is not None:
+            if not os.path.exists(arae_model_path):
+                logger.warning("Can't load arae model from {}".format(arae_model_path))
+            else:
+                logger.info('Loading arae model from: {}'.format(arae_model_path))
+                loaded = torch.load(arae_model_path, map_location=lambda storage, loc: storage)
+                gan_g.load_state_dict(loaded.get('gen'))
+                gan_d.load_state_dict(loaded.get('desc'))
+
+        gan_g.to(device)
+        gan_d.to(device)
+        model = model, gan_g, gan_d
+
     return model
 
 
 def build_model(model_opt, opt, fields, checkpoint):
     logger.info('Building model...')
-    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint)
+    model = build_base_model(model_opt, fields, use_gpu(opt), checkpoint, arae_setting=opt.arae,
+                             arae_model_path=opt.model_arae)
     logger.info(model)
     return model

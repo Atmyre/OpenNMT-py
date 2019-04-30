@@ -25,7 +25,7 @@ def build_translator(opt, report_score=True, logger=None, out_file=None):
 
     load_test_model = onmt.decoders.ensemble.load_test_model \
         if len(opt.models) > 1 else onmt.model_builder.load_test_model
-    fields, model, model_opt = load_test_model(opt)
+    fields, model, model_opt, *_ = load_test_model(opt)
 
     scorer = onmt.translate.GNMTGlobalScorer.from_opt(opt)
 
@@ -428,6 +428,7 @@ class Translator(object):
 
         # Encoder forward.
         src, enc_states, memory_bank, src_lengths = self._run_encoder(batch)
+
         self.model.decoder.init_state(src, memory_bank, enc_states)
 
         use_src_map = self.copy_attn
@@ -844,3 +845,4 @@ class Translator(object):
             shell=True, stdin=self.out_file
         ).decode("utf-8").strip()
         return msg
+

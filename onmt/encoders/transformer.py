@@ -2,11 +2,34 @@
 Implementation of "Attention is All You Need"
 """
 
+import torch
 import torch.nn as nn
+
+from torch.autograd import Variable
 
 from onmt.encoders.encoder import EncoderBase
 from onmt.modules import MultiHeadedAttention
 from onmt.modules.position_ffn import PositionwiseFeedForward
+
+
+class AttentionPooling(nn.Module):
+    def __init__(self, enc_size, attn_size, dropout_rate=0.0):
+        super().__init__()
+        self.logits = nn.Sequential(
+            nn.Linear(enc_size, attn_size),
+            nn.Dropout(dropout_rate),
+            nn.Tanh(),
+            nn.Linear(attn_size, 1),
+        )
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, inp, mask=None):
+        logits = self.logits(inp)[:, :, 0]
+        if mask is not None:
+            constant = torch.full_like(logits, -1e-9, dtype=torch.float32)
+            logits = torch.where(mask, logits, constant)
+        probs = self.softmax(logits)
+        return torch.sum(inp * probs[:, :, None], dim=1)
 
 
 class TransformerEncoderLayer(nn.Module):
@@ -83,8 +106,11 @@ class TransformerEncoder(EncoderBase):
     """
 
     def __init__(self, num_layers, d_model, heads, d_ff, dropout, embeddings,
-                 max_relative_positions):
+                 max_relative_positions, arae_setting=False, noise_r=0):
         super(TransformerEncoder, self).__init__()
+
+        self.arae_setting = arae_setting
+        self.noise_r = noise_r # arae param
 
         self.embeddings = embeddings
         self.transformer = nn.ModuleList(
@@ -93,6 +119,8 @@ class TransformerEncoder(EncoderBase):
                 max_relative_positions=max_relative_positions)
              for i in range(num_layers)])
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+        if arae_setting:
+            self.attention_pooling = AttentionPooling(d_model, d_model)
 
     @classmethod
     def from_opt(cls, opt, embeddings):
@@ -104,9 +132,10 @@ class TransformerEncoder(EncoderBase):
             opt.transformer_ff,
             opt.dropout,
             embeddings,
-            opt.max_relative_positions)
+            opt.max_relative_positions,
+            opt.arae, opt.noise_r)
 
-    def forward(self, src, lengths=None):
+    def forward(self, src, lengths=None, noise=False):
         """See :func:`EncoderBase.forward()`"""
         self._check_args(src, lengths)
 
@@ -122,4 +151,22 @@ class TransformerEncoder(EncoderBase):
             out = layer(out, mask)
         out = self.layer_norm(out)
 
-        return emb, out.transpose(0, 1).contiguous(), lengths
+        if not self.arae_setting:
+            return emb, out.transpose(0, 1).contiguous(), lengths
+
+        device = out.device
+        if noise and self.noise_r > 0:
+            gauss_noise = torch.normal(mean=torch.zeros(out.size()), std=self.noise_r)
+            out = out + gauss_noise.to(device)
+
+        #out_new = torch.zeros_like(out)
+        # comment for a while
+        #out_new[:, 0, :] = self.attention_pooling(out, mask[:, 0, :])
+        #out = out_new.transpose(0, 1)
+        out = out.transpose(0, 1)
+
+        token_mask = torch.zeros_like(out).to(device)
+        token_mask[0] = 1.
+        # size: (src_len, batch_size, model_dim)
+        return emb, out.contiguous() * token_mask, lengths
+

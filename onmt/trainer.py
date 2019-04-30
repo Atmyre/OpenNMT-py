@@ -13,6 +13,7 @@ from copy import deepcopy
 import itertools
 import torch
 import traceback
+from torch.autograd import Variable
 
 import onmt.utils
 from onmt.utils.logging import logger
@@ -32,6 +33,8 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
         model_saver(:obj:`onmt.models.ModelSaverBase`): the utility object
             used to save the model
     """
+    if opt.arae:
+        model, gan_gen, gan_disc = model
 
     tgt_field = dict(fields)["tgt"].base_field
     train_loss = onmt.utils.loss.build_loss_compute(model, tgt_field, opt)
@@ -58,17 +61,30 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
         if opt.early_stopping > 0 else None
 
     report_manager = onmt.utils.build_report_manager(opt)
+
+    if opt.arae:
+        model = model, gan_gen, gan_disc
     trainer = onmt.Trainer(model, train_loss, valid_loss, optim, trunc_size,
                            shard_size, norm_method,
                            accum_count, accum_steps,
                            n_gpu, gpu_rank,
                            gpu_verbose_level, report_manager,
-                           model_saver=model_saver if gpu_rank == 0 else None,
+                           model_saver=model_saver,
                            average_decay=average_decay,
                            average_every=average_every,
                            model_dtype=opt.model_dtype,
-                           earlystopper=earlystopper)
+                           earlystopper=earlystopper,
+                           arae_setting=opt.arae,
+                           niters_ae=opt.niters_ae,
+                           niters_gan_g=opt.niters_gan_g,
+                           niters_gan_d=opt.niters_gan_d,
+                           niters_gan_ae=opt.niters_gan_ae)
     return trainer
+
+
+def grad_hook(grad):
+    #gan_norm = torch.norm(grad, p=2, dim=1).detach().data.mean()
+    return grad * 0.1
 
 
 class Trainer(object):
@@ -104,7 +120,38 @@ class Trainer(object):
                  n_gpu=1, gpu_rank=1,
                  gpu_verbose_level=0, report_manager=None, model_saver=None,
                  average_decay=0, average_every=1, model_dtype='fp32',
-                 earlystopper=None):
+                 earlystopper=None,
+                 arae_setting=False,
+                 niters_ae=1, niters_gan_g=1, niters_gan_d=1, niters_gan_ae=1,
+                 batch_size=4096):
+        self.arae_setting = arae_setting
+        if arae_setting:
+
+            model, gan_gen, gan_disc = model
+            optim, optimizer_gan_g, optimizer_gan_d = optim
+            model_saver, gan_saver = model_saver
+
+            self.gan_gen = gan_gen
+            self.gan_disc = gan_disc
+            self.optimizer_gan_g = optimizer_gan_g
+            self.optimizer_gan_d = optimizer_gan_d
+
+            self.batch_size = batch_size
+
+            self.niters_ae = niters_ae
+            self.niters_gan_g = niters_gan_g
+            self.niters_gan_d = niters_gan_d
+            self.niters_gan_ae = niters_gan_ae
+
+            self.gan_saver = gan_saver
+
+            device = torch.device("cuda" if n_gpu > 0 else "cpu")
+            self.one = torch.Tensor(1).fill_(1).to(device)
+            self.mone = self.one * -1
+
+            gan_gen.train()
+            gan_disc.train()
+
         # Basic attributes.
         self.model = model
         self.train_loss = train_loss
@@ -127,6 +174,7 @@ class Trainer(object):
         self.model_dtype = model_dtype
         self.earlystopper = earlystopper
 
+
         for i in range(len(self.accum_count_l)):
             assert self.accum_count_l[i] > 0
             if self.accum_count_l[i] > 1:
@@ -136,6 +184,7 @@ class Trainer(object):
 
         # Set model in training mode.
         self.model.train()
+
 
     def _accum_count(self, step):
         for i in range(len(self.accum_steps)):
@@ -177,6 +226,25 @@ class Trainer(object):
                     (1 - average_decay) * avg + \
                     cpt.detach().float() * average_decay
 
+
+    ''' Steal from https://github.com/caogang/wgan-gp/blob/master/gan_cifar10.py '''
+    def calc_gradient_penalty(self, netD, real_data, fake_data):
+        bsz = real_data.size(0)
+        alpha = torch.rand(bsz, 1)
+        alpha = alpha.expand(bsz, real_data.size(1))  # only works for 2D XXX
+        alpha = alpha.cuda()
+        interpolates = alpha * real_data + ((1 - alpha) * fake_data)
+        interpolates = Variable(interpolates, requires_grad=True)
+        disc_interpolates = netD(interpolates)
+
+        gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                                        grad_outputs=torch.ones(disc_interpolates.size()).cuda(),
+                                        create_graph=True, retain_graph=True, only_inputs=True)[0]
+        gradients = gradients.view(gradients.size(0), -1)
+
+        gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 1
+        return gradient_penalty
+
     def train(self,
               train_iter,
               train_steps,
@@ -216,6 +284,13 @@ class Trainer(object):
                 self._accum_batches(train_iter)):
             step = self.optim.training_step
 
+            if self.arae_setting:  # fix step for arae setting
+                delta = 0
+                if i > 0:
+                    ac_gae_steps = (i-1) // self.niters_ae + 1
+                    delta = self.niters_gan_ae * ac_gae_steps + 1
+                step -= delta
+
             if self.gpu_verbose_level > 1:
                 logger.info("GpuRank %d: index: %d", self.gpu_rank, i)
             if self.gpu_verbose_level > 0:
@@ -240,7 +315,24 @@ class Trainer(object):
                 self.optim.learning_rate(),
                 report_stats)
 
+            if self.arae_setting:
+            #if False:
+                if i % self.niters_ae == 0:
+                    for k in range(1):
+                        for i in range(self.niters_gan_d):
+                            errD, errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
+                                                                                       total_stats, report_stats)
+                        for i in range(self.niters_gan_ae):
+                            self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
+                        for i in range(self.niters_gan_g):
+                            errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
+
             if valid_iter is not None and step % valid_steps == 0:
+                if self.arae_setting:
+                #if False:
+                    print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
+                        .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
+
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
                                 % (self.gpu_rank, step))
@@ -266,12 +358,18 @@ class Trainer(object):
                 and (save_checkpoint_steps != 0
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
+                if self.arae_setting:
+                #if False:
+                    self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
                 break
 
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
+            if self.arae_setting:
+            #if False:
+                self.gan_saver.save(step, moving_average=self.moving_average)
         return total_stats
 
     def validate(self, valid_iter, moving_average=None):
@@ -317,6 +415,104 @@ class Trainer(object):
 
         return stats
 
+    def _gradient_accumulation_g(self, true_batches, normalization, total_stats, report_stats):
+        self.gan_gen.train()
+        if self.accum_count > 1:
+            self.optimizer_gan_g.zero_grad()
+
+        errGs = []
+        for k, batch in enumerate(true_batches):
+
+            src, src_lengths = batch.src if isinstance(batch.src, tuple) \
+                else (batch.src, None)
+
+            if self.accum_count == 1:
+                self.optimizer_gan_g.zero_grad()
+
+            # 2. F-prop all but generator.
+            z_hidden_size, batch_size = self.gan_gen.ninput, src.size(1)
+            z = Variable(torch.Tensor(batch_size, z_hidden_size).normal_(0, 1).cuda())
+            fake_hidden = self.gan_gen(z)
+            errG = self.gan_disc(fake_hidden)
+            errG.backward(self.one)
+            errGs.append(errG.data.item())
+
+        self.optimizer_gan_g.step()
+
+        return errGs
+
+    def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
+        self.gan_disc.train()
+        self.model.eval()
+
+        if self.accum_count > 1:
+            self.optimizer_gan_d.zero_grad()
+
+        errD_reals = []
+        errD_fakes = []
+        errDs = []
+
+        for k, batch in enumerate(true_batches):
+
+            src, src_lengths = batch.src if isinstance(batch.src, tuple) \
+                else (batch.src, None)
+
+            if self.accum_count == 1:
+                self.optimizer_gan_d.zero_grad()
+
+            # 2. F-prop all but generator.
+            with torch.no_grad():
+                _, real_hidden, _ = self.model.encoder(src, src_lengths)
+            Z_vec = real_hidden[0]   # (batch_size, model_dim)
+            errD_real = self.gan_disc(Z_vec.detach())
+            errD_real.backward(self.one)
+
+            batch_size = real_hidden.size(1)
+            z = Variable(torch.Tensor(batch_size, self.gan_gen.ninput).normal_(0, 1).cuda())
+            fake_hidden = self.gan_gen(z)
+            errD_fake = self.gan_disc(fake_hidden.detach())
+            errD_fake.backward(self.mone)
+
+            gradient_penalty = self.calc_gradient_penalty(self.gan_disc, Z_vec.data, fake_hidden.data)
+            gradient_penalty.backward()
+
+
+            errD_reals.append(errD_real)
+            errD_fakes.append(errD_fake)
+            errDs.append(errD_fake - errD_real)
+
+        self.optimizer_gan_d.step()
+
+        self.model.train()
+
+        return errDs, errD_reals, errD_fakes
+
+
+    def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
+        self.model.train()
+
+        if self.accum_count > 1:
+            self.optim.zero_grad()
+
+        for k, batch in enumerate(true_batches):
+
+            src, src_lengths = batch.src if isinstance(batch.src, tuple) \
+                else (batch.src, None)
+
+            # 2. F-prop all but generator.
+            if self.accum_count == 1:
+                self.optim.zero_grad()
+
+            _, real_hidden, _ = self.model.encoder(src, src_lengths, noise=False)
+            Z_vec = real_hidden[0]
+            Z_vec.register_hook(grad_hook)
+            errD_real = self.gan_disc(Z_vec)
+            errD_real.backward(self.mone)
+            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
+
+        self.optim.step()
+
+
     def _gradient_accumulation(self, true_batches, normalization, total_stats,
                                report_stats):
         if self.accum_count > 1:
@@ -345,7 +541,7 @@ class Trainer(object):
                 # 2. F-prop all but generator.
                 if self.accum_count == 1:
                     self.optim.zero_grad()
-                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt)
+                outputs, attns = self.model(src, tgt, src_lengths, bptt=bptt, noise=True)
                 bptt = True
 
                 # 3. Compute loss.
