@@ -79,13 +79,13 @@ class TextGenerator(object):
         noise = torch.Tensor(n_sents, z_hidden_size).normal_(0, 1).to(self.device)
         fake_hidden = self.gan_g(noise)
 
-        memory_bank = torch.zeros(25, n_sents, 512)  # 25 is an avg length of sent, 512 - internal repr
+        memory_bank = torch.zeros(self.max_length, n_sents, 512).to(self.device)  # 512 - internal repr
         memory_bank[0] = fake_hidden
 
         self.model.decoder.init_state(None, memory_bank, None)
 
         BOS = 2  # hardcoded
-        reconstruct_seq = torch.full([batch_size, 1], BOS, dtype=torch.long, device=self.device)
+        reconstruct_seq = torch.full([batch_size, 1], BOS, dtype=torch.long, device=self.device).to(self.device)
 
         for step in range(self.max_length):
             decoder_in = reconstruct_seq[:, -1].view(1, -1, 1)  # (1, B, 1)
@@ -109,7 +109,8 @@ class TextGenerator(object):
             return tokens_line.index(eos_token)+1
 
         tokens = [tokens_line[:get_slice_idx(tokens_line)] for tokens_line in tokens]
-        sents = [' '.join(token_line) for token_line in tokens]
+        # chop bos eos in addition
+        sents = [' '.join(token_line[1:-1]) for token_line in tokens]
         return sents
 
     def _convert_idxs_to_tokens(self, idxs):

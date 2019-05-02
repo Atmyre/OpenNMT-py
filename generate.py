@@ -29,7 +29,7 @@ def _get_parser():
     parser = ArgumentParser(description='generate.py')
 
     opts.config_opts(parser)
-    opts.translate_opts(parser)
+    opts.generate_opts(parser)
     return parser
 
 
