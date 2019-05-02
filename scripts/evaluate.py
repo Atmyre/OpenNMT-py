@@ -1,8 +1,3 @@
-#from torch.autograd import Variable
-#from utils import get_ppl, train_ngram_lm
-#from utils import autoencode_sentences
-#from models import Seq2Seq, MLP_D, MLP_G, generate
-
 import os
 import subprocess
 import argparse
@@ -100,6 +95,7 @@ def parse_args():
     # Other options
     parser.add_argument('--gpu', type=int, default=-1, help='use gpu')
     parser.add_argument('--maxlen', type=int, default=15, help='max len of sents to generate')
+    parser.add_argument('--train_generated_sentences', type=str, help='path to train generated sentences')
 
     args = parser.parse_args()
     set_missing_args(args)
@@ -174,13 +170,20 @@ def compute_forward_ppl(model, vocab, reference_lm, count, maxlen, gpu):
     return ppl
 
 
-def compute_reverse_ppl(model, vocab, count, test_sents, maxlen, gpu):
+def compute_reverse_ppl(model, vocab, count, test_sents, maxlen, gpu, train_generated_sentences_path=None):
     logger.info('Compute Reverse PPL')
     batch_size = count if count <= 3000 else 3000  # generation with batches
 
     generated_sents = generate_sentences(model, vocab, count, maxlen, gpu, batch_size=batch_size)
     # have to change <unk> into <oov> for building kenlm
     generated_sents = [sent.replace('<unk>', '<oov>') for sent in generated_sents]
+
+    if train_generated_sentences_path:
+        with open(train_generated_sentences_path, 'w', encoding='utf-8') as f:
+            for sent in generated_sents:
+                f.write(sent+'\n')
+        print('Dumped generated sentences: {}'.format(train_generated_sentences_path))
+
     ref_gen_model = ReferenceLM.build(generated_sents)
     ppl = ref_gen_model.get_ppl(test_sents)
     return ppl
@@ -243,7 +246,8 @@ def main(args):
         scores['forward_ppl'] = forward_ppl
     if args.reverse_ppl:
         test_sents = read_sents(args.test_filepath)
-        reverse_ppl = compute_reverse_ppl(model, vocab, args.gen_train_size, test_sents, args.maxlen, args.gpu)
+        reverse_ppl = compute_reverse_ppl(model, vocab, args.gen_train_size, test_sents, args.maxlen, args.gpu,
+                                          train_generated_sentences_path=args.train_generated_sentences)
         scores['reverse_ppl'] = reverse_ppl
     if args.bleu:
         test_sents = test_sents if test_sents else read_sents(args.test_filepath)

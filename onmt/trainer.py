@@ -17,6 +17,9 @@ from torch.autograd import Variable
 
 import onmt.utils
 from onmt.utils.logging import logger
+from reference_lm.kenlm_model import KenlmModel
+from onmt.translate.generator import TextGenerator
+from reference_lm.utils import AttrDict
 
 
 def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
@@ -78,7 +81,10 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            niters_ae=opt.niters_ae,
                            niters_gan_g=opt.niters_gan_g,
                            niters_gan_d=opt.niters_gan_d,
-                           niters_gan_ae=opt.niters_gan_ae)
+                           niters_gan_ae=opt.niters_gan_ae,
+                           compute_forward_ppl=opt.compute_forward_ppl,
+                           reference_model_path=opt.reference_model_path,
+                           fields=fields)
     return trainer
 
 
@@ -123,9 +129,16 @@ class Trainer(object):
                  earlystopper=None,
                  arae_setting=False,
                  niters_ae=1, niters_gan_g=1, niters_gan_d=1, niters_gan_ae=1,
+                 compute_forward_ppl=False, reference_model_path=None, fields=None,
                  batch_size=4096):
         self.arae_setting = arae_setting
+        if compute_forward_ppl and ((reference_model_path is None) or (fields is None)):
+            raise RuntimeError("-reference_model_path should be set to compute forward ppl")
         if arae_setting:
+            logger.info('Loading KenlmModel for forward ppl evaluation')
+            self.compute_forward_ppl = compute_forward_ppl
+            self.kenlm_model = KenlmModel(reference_model_path)
+            self.vocab = fields
 
             model, gan_gen, gan_disc = model
             optim, optimizer_gan_g, optimizer_gan_d = optim
@@ -245,6 +258,22 @@ class Trainer(object):
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * 1
         return gradient_penalty
 
+    def generate_sentences(self, count):
+        gpu = self.gpu_rank[0] if isinstance(self.gpu_rank, list) else self.gpu_rank
+        opt = AttrDict({'max_length': 15, 'gpu': gpu})  # hardcoded for some reason
+        generator = TextGenerator.from_opt(
+            self.model, self.gan_gen, self.gan_disc,  self.vocab, opt)
+        sents = generator.generate(n_sents=count)
+        n_sents = len(sents)
+        logger.info('{} sents were generated for forward ppl'.format(len(sents)))
+        logger.info('Examples:\n    {}'.format('\n    '.join(sents[:3])))
+        return sents
+
+    def get_forward_ppl(self):
+        gen_sentences = self.generate_sentences(count=1000)  # hardcoded for some reason also
+        ppl = self.kenlm_model.get_ppl(gen_sentences)
+        return ppl
+
     def train(self,
               train_iter,
               train_steps,
@@ -316,7 +345,6 @@ class Trainer(object):
                 report_stats)
 
             if self.arae_setting:
-            #if False:
                 if i % self.niters_ae == 0:
                     for k in range(1):
                         for i in range(self.niters_gan_d):
@@ -329,9 +357,11 @@ class Trainer(object):
 
             if valid_iter is not None and step % valid_steps == 0:
                 if self.arae_setting:
-                #if False:
-                    print("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
+                    logger.info("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
                         .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
+                if self.compute_forward_ppl:
+                    forward_ppl = self.get_forward_ppl()
+                    logger.info('Forward PPL with kenlm: {:.4f}'.format(forward_ppl))
 
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
@@ -359,7 +389,6 @@ class Trainer(object):
                      and step % save_checkpoint_steps == 0)):
                 self.model_saver.save(step, moving_average=self.moving_average)
                 if self.arae_setting:
-                #if False:
                     self.gan_saver.save(step, moving_average=self.moving_average)
 
             if train_steps > 0 and step >= train_steps:
@@ -368,7 +397,6 @@ class Trainer(object):
         if self.model_saver is not None:
             self.model_saver.save(step, moving_average=self.moving_average)
             if self.arae_setting:
-            #if False:
                 self.gan_saver.save(step, moving_average=self.moving_average)
         return total_stats
 

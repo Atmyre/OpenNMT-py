@@ -562,6 +562,11 @@ def train_opts(parser):
               help="Using grayscale image can training "
                    "model faster and smaller")
 
+    group.add('--compute_forward_ppl', '-compute_forward_ppl',
+              action='store_true', help='should compute forward ppl for validation')
+    group.add('--reference_model_path', '-reference_model_path', type=str,
+              help='path for a kenlm reference model. should be set for compute_forward_ppl')
+
 
 def translate_opts(parser):
     """ Translation / inference options """
