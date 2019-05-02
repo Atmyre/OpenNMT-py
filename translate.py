@@ -15,7 +15,6 @@ from onmt.utils.parse import ArgumentParser
 def main(opt):
     ArgumentParser.validate_translate_opts(opt)
     logger = init_logger(opt.log_file)
-    print('opt', opt)
 
     translator = build_translator(opt, report_score=True)
     src_shards = split_corpus(opt.src, opt.shard_size)

@@ -13,7 +13,7 @@ import torch
 from torch import nn
 import onmt
 from onmt.utils.parse import ArgumentParser
-from onmt.model_builder import build_model
+from onmt.model_builder import build_base_model
 from onmt.translate.generator import TextGenerator
 from onmt.translate.translator import Translator
 from onmt.utils.misc import split_corpus
@@ -45,7 +45,7 @@ def get_file_head(filepath):
 
 def show_file_head(filepath):
     lines = get_file_head(filepath)
-    print('\n'.join(lines))
+    logger.debug('\n  '+'\n  '.join(lines))
 
 
 def set_missing_args(args):
@@ -121,8 +121,8 @@ def load_model(autoencoder_fp, gan_model_fp, gpu):
         'arae': True,
         'model_arae': gan_model_fp
     })
-    ae, gan_g, gan_d = build_model(model_opt, opt, vocab, ae_checkpoint)
-    ae.eval()
+    ae, gan_g, gan_d = build_base_model(model_opt, vocab, int(gpu > -1), checkpoint=ae_checkpoint,
+                                        gpu_id=gpu, arae_setting=True, arae_model_path=gan_model_fp)
     ae.generator.eval()
     gan_g.eval()
     gan_d.eval()
@@ -188,13 +188,12 @@ def compute_reverse_ppl(model, vocab, count, test_sents, maxlen, gpu):
 
 def compute_bleu(model, vocab, model_opt, test_sents, gpu):
     logger.info('Compute BLEU')
-    inp_fp = tempfile.NamedTemporaryFile(mode='w')
-    inp_file = codecs.open(inp_fp.name, 'w', 'utf-8')
+    inp_fp = tempfile.NamedTemporaryFile(mode='w', encoding='utf-8')
     for sent in test_sents:
-        inp_file.write(sent+'\n')
-    inp_file.flush()
-    print(':::TEST:::')
-    show_file_head(inp_file.name)
+        inp_fp.write(sent+'\n')
+    inp_fp.flush()
+    logger.debug(':::TEST:::')
+    show_file_head(inp_fp.name)
 
     opt = AttrDict({
         'gpu': gpu,
@@ -213,24 +212,24 @@ def compute_bleu(model, vocab, model_opt, test_sents, gpu):
         'coverage_penalty': 'none'
     })
 
-    fp = tempfile.NamedTemporaryFile(mode='w')
-    out_file = codecs.open(fp.name, 'w', 'utf-8')
+    fp = tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8')
     scorer = onmt.translate.GNMTGlobalScorer.from_opt(opt)
     translator = Translator.from_opt(model[0], vocab,
         opt, model_opt,
-        out_file=out_file,  # should dump into a file cause of bleu script
-        global_scorer=scorer
+        out_file=fp,  # should dump into a file cause of bleu script
+        global_scorer=scorer,
+        report_score=False
     )
 
-    src_shards = split_corpus(inp_file.name, shard_size=32)
-
-    translator.translate(src=src_shards, batch_size=30)
-    print(':::PRED:::')
+    src_shards = split_corpus(inp_fp.name, shard_size=32)
+    logger.info("Translating...")
+    for src_shard in tqdm(src_shards):
+        translator.translate(src=src_shard, batch_size=30)
+    logger.debug(':::PRED:::')
     show_file_head(fp.name)
 
     cmd = 'perl ./multi-bleu.perl {} < {}'.format(inp_fp.name, fp.name)
     out = subprocess.check_output(cmd, shell=True).decode("utf-8")
-    print('OUT', out)
     return float(out)
 
 
