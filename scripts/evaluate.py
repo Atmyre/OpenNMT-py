@@ -4,17 +4,23 @@
 #from models import Seq2Seq, MLP_D, MLP_G, generate
 
 import os
+import subprocess
 import argparse
 import logging
+import codecs
 import numpy as np
 import torch
 from torch import nn
+import onmt
 from onmt.utils.parse import ArgumentParser
 from onmt.model_builder import build_model
 from onmt.translate.generator import TextGenerator
+from onmt.translate.translator import Translator
+from onmt.utils.misc import split_corpus
 from reference_lm.kenlm_model import KenlmModel
 from reference_lm.utils import AttrDict
 from tqdm import tqdm
+import tempfile
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -25,6 +31,21 @@ ReferenceLM = KenlmModel
 
 def get_file_lines_count(filepath):
     return sum(1 for line in open(filepath))
+
+
+def get_file_head(filepath):
+    lines = []
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for idx, line in enumerate(f, start=1):
+            lines.append(line.strip())
+            if idx == 5:
+                break
+    return lines
+
+
+def show_file_head(filepath):
+    lines = get_file_head(filepath)
+    print('\n'.join(lines))
 
 
 def set_missing_args(args):
@@ -106,7 +127,7 @@ def load_model(autoencoder_fp, gan_model_fp, gpu):
     gan_g.eval()
     gan_d.eval()
 
-    return (ae, gan_g, gan_d), vocab
+    return (ae, gan_g, gan_d), vocab, model_opt
 
 
 def create_reference_lm(reference_lm, train_filepath):
@@ -165,13 +186,56 @@ def compute_reverse_ppl(model, vocab, count, test_sents, maxlen, gpu):
     return ppl
 
 
-def compute_bleu(model, test_sents):
+def compute_bleu(model, vocab, model_opt, test_sents, gpu):
     logger.info('Compute BLEU')
-    raise NotImplemented
+    inp_fp = tempfile.NamedTemporaryFile(mode='w')
+    inp_file = codecs.open(inp_fp.name, 'w', 'utf-8')
+    for sent in test_sents:
+        inp_file.write(sent+'\n')
+    inp_file.flush()
+    print(':::TEST:::')
+    show_file_head(inp_file.name)
+
+    opt = AttrDict({
+        'gpu': gpu,
+        'n_best': 1,
+        'min_length': 0, 'max_length': 100,
+        'ratio': 0.,
+        'beam_size': 1,
+        'random_sampling_topk': 1, 'random_sampling_temp': 1,
+        'stepwise_penalty': False, 'dump_beam': '',
+        'block_ngram_repeat': 0, 'ignore_when_blocking': set(),
+        'replace_unk': False, 'phrase_table': '',
+        'data_type': 'text', 'verbose': False, 'report_bleu': False,
+        'report_rouge': False, 'report_time': False, 'seed': 829,
+
+        'alpha': 0.0, 'beta': 0.0, 'length_penalty': 'none',
+        'coverage_penalty': 'none'
+    })
+
+    fp = tempfile.NamedTemporaryFile(mode='w')
+    out_file = codecs.open(fp.name, 'w', 'utf-8')
+    scorer = onmt.translate.GNMTGlobalScorer.from_opt(opt)
+    translator = Translator.from_opt(model[0], vocab,
+        opt, model_opt,
+        out_file=out_file,  # should dump into a file cause of bleu script
+        global_scorer=scorer
+    )
+
+    src_shards = split_corpus(inp_file.name, shard_size=32)
+
+    translator.translate(src=src_shards, batch_size=30)
+    print(':::PRED:::')
+    show_file_head(fp.name)
+
+    cmd = 'perl ./multi-bleu.perl {} < {}'.format(inp_fp.name, fp.name)
+    out = subprocess.check_output(cmd, shell=True).decode("utf-8")
+    print('OUT', out)
+    return float(out)
 
 
 def main(args):
-    model, vocab = load_model(args.autoencoder, args.gan_model, args.gpu)
+    model, vocab, model_opt = load_model(args.autoencoder, args.gan_model, args.gpu)
     scores = {}
     test_sents = None
     if args.forward_ppl:
@@ -184,7 +248,7 @@ def main(args):
         scores['reverse_ppl'] = reverse_ppl
     if args.bleu:
         test_sents = test_sents if test_sents else read_sents(args.test_filepath)
-        bleu = compute_bleu(model, test_sents)
+        bleu = compute_bleu(model, vocab, model_opt, test_sents, args.gpu)
         scores['bleu'] = bleu
     dump_scores(scores)
 
