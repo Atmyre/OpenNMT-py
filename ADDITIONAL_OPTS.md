@@ -4,6 +4,8 @@
 | -arae       | arae setting. w/o the flag will be a basic transformer  | -arae                                      |
 | -save_gan   | path where to save model                                | -save_gan ./data_autoenc/gan               |
 | -model_arae | path to arae model from where to load it                | -model_arae data_autoenc/gan_step_17000.pt |
+| -train_from, -model_arae | path to load saved models                  | -train_from ./data_autoenc/model_step_17000.pt -model_arae data_autoenc/gan_step_1700.pt |
+| -compute_forward_ppl     | compute forward ppl when training          | -compute_forward_ppl -reference_model_path knlm.arpa                                     |
 
 Examples of scripts:
 
