@@ -471,7 +471,6 @@ class Trainer(object):
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
         self.gan_disc.train()
-        self.model.eval()
 
         if self.accum_count > 1:
             self.optimizer_gan_d.zero_grad()
@@ -510,8 +509,6 @@ class Trainer(object):
             errDs.append(errD_fake - errD_real)
 
         self.optimizer_gan_d.step()
-
-        self.model.train()
 
         return errDs, errD_reals, errD_fakes
 
