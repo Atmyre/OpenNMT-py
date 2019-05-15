@@ -8,6 +8,7 @@ import time
 from itertools import count
 
 import torch
+import torch.nn.functional as F
 
 import onmt.model_builder
 import onmt.translate.beam
@@ -39,13 +40,10 @@ def sample_next_idxs(log_probs):
     if ARG_MAX:
         return torch.argmax(log_probs, dim=1, keepdim=True)
 
-    sampling_temp = 1.5
-    log_probs = torch.div(log_probs, sampling_temp)
-
-    dist = torch.distributions.Multinomial(logits=log_probs, total_count=1)
-    topk_ids = torch.argmax(dist.sample(), dim=1, keepdim=True)
-
-    return topk_ids
+    sampling_temp = 0.05
+    probs = F.softmax(log_probs.float() / sampling_temp, dim=-1)
+    indices = torch.multinomial(probs, 1)
+    return indices
 
 
 class TextGenerator(object):

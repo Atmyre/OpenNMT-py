@@ -3,6 +3,8 @@
 import os
 import signal
 import torch
+import numpy as np
+import random
 
 import onmt.opts as opts
 import onmt.utils.distributed
@@ -12,10 +14,18 @@ from onmt.train_single import main as single_main
 from onmt.utils.parse import ArgumentParser
 
 
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+
+
 def main(opt):
     ArgumentParser.validate_train_opts(opt)
     ArgumentParser.update_model_opts(opt)
     ArgumentParser.validate_model_opts(opt)
+    set_seed(3435)
 
     nb_gpu = len(opt.gpu_ranks)
 

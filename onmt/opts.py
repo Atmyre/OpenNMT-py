@@ -566,6 +566,8 @@ def train_opts(parser):
               action='store_true', help='should compute forward ppl for validation')
     group.add('--reference_model_path', '-reference_model_path', type=str,
               help='path for a kenlm reference model. should be set for compute_forward_ppl')
+    group.add('--model_fixed_step', '-model_fixed_step', type=int,
+              help='stop training model after this number of steps, training GAN')
 
 
 def translate_opts(parser):

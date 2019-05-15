@@ -9,6 +9,7 @@
           users of this library) for the strategy things we do.
 """
 
+import numpy as np
 from copy import deepcopy
 import itertools
 import torch
@@ -84,13 +85,22 @@ def build_trainer(opt, device_id, model, fields, optim, model_saver=None):
                            niters_gan_ae=opt.niters_gan_ae,
                            compute_forward_ppl=opt.compute_forward_ppl,
                            reference_model_path=opt.reference_model_path,
+                           model_fixed_step=opt.model_fixed_step,
                            fields=fields)
     return trainer
 
 
 def grad_hook(grad):
     #gan_norm = torch.norm(grad, p=2, dim=1).detach().data.mean()
-    return grad * 0.1
+    return grad * 0.001
+
+
+def load_test_sentences():
+    sents = []
+    with open('/data/rimarakulin/snli/test.txt', 'r', encoding='utf-8') as f:
+        for line in f:
+            sents.append(line.strip().lower())
+    return sents
 
 
 class Trainer(object):
@@ -130,6 +140,7 @@ class Trainer(object):
                  arae_setting=False,
                  niters_ae=1, niters_gan_g=1, niters_gan_d=1, niters_gan_ae=1,
                  compute_forward_ppl=False, reference_model_path=None, fields=None,
+                 model_fixed_step=None,
                  batch_size=4096):
         self.arae_setting = arae_setting
         if compute_forward_ppl and ((reference_model_path is None) or (fields is None)):
@@ -139,6 +150,7 @@ class Trainer(object):
             self.compute_forward_ppl = compute_forward_ppl
             self.kenlm_model = KenlmModel(reference_model_path)
             self.vocab = fields
+            self.model_fixed_step = model_fixed_step
 
             model, gan_gen, gan_disc = model
             optim, optimizer_gan_g, optimizer_gan_d = optim
@@ -164,6 +176,10 @@ class Trainer(object):
 
             gan_gen.train()
             gan_disc.train()
+
+            # fix steps iteration
+            self._additional_internal_steps = 0
+            self.test_sents = load_test_sentences()
 
         # Basic attributes.
         self.model = model
@@ -263,16 +279,41 @@ class Trainer(object):
         opt = AttrDict({'max_length': 15, 'gpu': gpu})  # hardcoded for some reason
         generator = TextGenerator.from_opt(
             self.model, self.gan_gen, self.gan_disc,  self.vocab, opt)
-        sents = generator.generate(n_sents=count)
-        n_sents = len(sents)
+        max_batch_size = 2000
+        n_batches = count // max_batch_size
+        sents = []
+        for batch_idx in range(n_batches):
+            sents += generator.generate(n_sents=max_batch_size)
         logger.info('{} sents were generated for forward ppl'.format(len(sents)))
         logger.info('Examples:\n    {}'.format('\n    '.join(sents[:3])))
         return sents
 
     def get_forward_ppl(self):
-        gen_sentences = self.generate_sentences(count=1000)  # hardcoded for some reason also
+        gen_sentences = self.generate_sentences(count=10000)  # hardcoded for some reason also
         ppl = self.kenlm_model.get_ppl(gen_sentences)
         return ppl
+
+    def get_forward_reverse_ppl(self):
+        gen_sentences = self.generate_sentences(count=100000)
+        forward_ppl = self.kenlm_model.get_ppl(gen_sentences)
+
+        try:
+            tmp_model = KenlmModel.build(gen_sentences)
+            reverse_ppl = tmp_model.get_ppl(self.test_sents)
+        except:
+            reverse_ppl = 0.0
+
+        return forward_ppl, reverse_ppl
+
+    def show_grad_gen(self):
+        gen_grad = self.gan_gen.layers[-1].weight.grad
+        gen_grad_mean = gen_grad.mean().cpu()
+        print('gen_grad_mean', gen_grad_mean)
+
+    def show_grad_disc(self):
+        grad = self.gan_disc.layers[-1].weight.grad
+        grad_mean = grad.mean().cpu()
+        print('disc_grad_mean', grad_mean)
 
     def train(self,
               train_iter,
@@ -300,6 +341,8 @@ class Trainer(object):
         else:
             logger.info('Start training loop and validate every %d steps...',
                         valid_steps)
+        steps_count = 0
+        alpha = 0.001
 
         total_stats = onmt.utils.Statistics()
         report_stats = onmt.utils.Statistics()
@@ -313,13 +356,6 @@ class Trainer(object):
                 self._accum_batches(train_iter)):
             step = self.optim.training_step
 
-            if self.arae_setting:  # fix step for arae setting
-                delta = 0
-                if i > 0:
-                    ac_gae_steps = (i-1) // self.niters_ae + 1
-                    delta = self.niters_gan_ae * ac_gae_steps + 1
-                step -= delta
-
             if self.gpu_verbose_level > 1:
                 logger.info("GpuRank %d: index: %d", self.gpu_rank, i)
             if self.gpu_verbose_level > 0:
@@ -331,73 +367,83 @@ class Trainer(object):
                 normalization = sum(onmt.utils.distributed
                                     .all_gather_list
                                     (normalization))
+            self.model.train()
+            self.gan_disc.train()
+            self.gan_gen.train()
 
-            self._gradient_accumulation(
-                batches, normalization, total_stats,
-                report_stats)
+            if (not self.arae_setting) or (not self.model_fixed_step) or (steps_count < self.model_fixed_step):
+                self._gradient_accumulation(batches, normalization, total_stats, report_stats)
 
-            if self.average_decay > 0 and i % self.average_every == 0:
-                self._update_average(step)
+                if self.average_decay > 0 and i % self.average_every == 0:
+                    self._update_average(steps_count)
 
-            report_stats = self._maybe_report_training(
-                step, train_steps,
-                self.optim.learning_rate(),
-                report_stats)
+                report_stats = self._maybe_report_training(
+                    steps_count, train_steps,
+                    self.optim.learning_rate(),
+                    report_stats)
+
+            steps_count += 1
 
             if self.arae_setting:
-                if i % self.niters_ae == 0:
-                    for k in range(1):
-                        for i in range(self.niters_gan_d):
-                            errD, errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
-                                                                                       total_stats, report_stats)
-                        for i in range(self.niters_gan_ae):
-                            self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats)
-                        for i in range(self.niters_gan_g):
-                            errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
+                if (self.model_fixed_step is None) or (self.model_fixed_step <= steps_count):
+                    if i % self.niters_ae == 0:
+                        for k in range(1):
+                            for i in range(self.niters_gan_d):
+                                errD, errD_real, errD_fake = self._gradient_accumulation_d(batches, normalization,
+                                                                                           total_stats, report_stats)
+                            if self.model_fixed_step is None:
+                                for i in range(self.niters_gan_ae):
+                                    alpha = self.optim.learning_rate() * 1000
+                                    self._gradient_accumulation_gan_ae(batches, normalization, total_stats, report_stats, alpha)
+                            for i in range(self.niters_gan_g):
+                                errG = self._gradient_accumulation_g(batches, normalization, total_stats, report_stats)
 
-            if valid_iter is not None and step % valid_steps == 0:
+            if valid_iter is not None and steps_count % valid_steps == 0:
                 if self.arae_setting:
-                    logger.info("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
-                        .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
-                if self.compute_forward_ppl:
-                    forward_ppl = self.get_forward_ppl()
-                    logger.info('Forward PPL with kenlm: {:.4f}'.format(forward_ppl))
+                    if (self.model_fixed_step is None) or (self.model_fixed_step <= steps_count):
+                        logger.info("GAN scores, G: {:.4f}, D: {:.4f}, D_r: {:.4f}, D_f: {:.4f}"\
+                            .format(errG[-1], errD[-1], errD_real[-1], errD_fake[-1]))
+                    if self.compute_forward_ppl:
+                        if (self.model_fixed_step is None) or (self.model_fixed_step <= steps_count):
+                            forward_ppl, reverse_ppl = self.get_forward_reverse_ppl()
+                            logger.info('forward ppl: {:.4f}, reverse ppl: {:.4f}'.format(forward_ppl, reverse_ppl))
 
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: validate step %d'
-                                % (self.gpu_rank, step))
+                                % (self.gpu_rank, steps_count))
                 valid_stats = self.validate(
                     valid_iter, moving_average=self.moving_average)
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: gather valid stat \
-                                step %d' % (self.gpu_rank, step))
+                                step %d' % (self.gpu_rank, steps_count))
                 valid_stats = self._maybe_gather_stats(valid_stats)
                 if self.gpu_verbose_level > 0:
                     logger.info('GpuRank %d: report stat step %d'
-                                % (self.gpu_rank, step))
+                                % (self.gpu_rank, steps_count))
                 self._report_step(self.optim.learning_rate(),
-                                  step, valid_stats=valid_stats)
+                                  steps_count, valid_stats=valid_stats)
                 # Run patience mechanism
                 if self.earlystopper is not None:
-                    self.earlystopper(valid_stats, step)
+                    self.earlystopper(valid_stats, steps_count)
                     # If the patience has reached the limit, stop training
                     if self.earlystopper.has_stopped():
                         break
 
             if (self.model_saver is not None
                 and (save_checkpoint_steps != 0
-                     and step % save_checkpoint_steps == 0)):
-                self.model_saver.save(step, moving_average=self.moving_average)
+                     and steps_count % save_checkpoint_steps == 0)):
+                self.model_saver.save(steps_count, moving_average=self.moving_average)
                 if self.arae_setting:
-                    self.gan_saver.save(step, moving_average=self.moving_average)
+                    self.gan_saver.save(steps_count, moving_average=self.moving_average)
 
-            if train_steps > 0 and step >= train_steps:
+            if train_steps > 0 and steps_count >= train_steps:
                 break
 
+
         if self.model_saver is not None:
-            self.model_saver.save(step, moving_average=self.moving_average)
+            self.model_saver.save(steps_count, moving_average=self.moving_average)
             if self.arae_setting:
-                self.gan_saver.save(step, moving_average=self.moving_average)
+                self.gan_saver.save(steps_count, moving_average=self.moving_average)
         return total_stats
 
     def validate(self, valid_iter, moving_average=None):
@@ -445,6 +491,7 @@ class Trainer(object):
 
     def _gradient_accumulation_g(self, true_batches, normalization, total_stats, report_stats):
         self.gan_gen.train()
+
         if self.accum_count > 1:
             self.optimizer_gan_g.zero_grad()
 
@@ -459,11 +506,13 @@ class Trainer(object):
 
             # 2. F-prop all but generator.
             z_hidden_size, batch_size = self.gan_gen.ninput, src.size(1)
-            z = Variable(torch.Tensor(batch_size, z_hidden_size).normal_(0, 1).cuda())
+            z = torch.Tensor(batch_size, z_hidden_size).normal_(0, 1).cuda()
             fake_hidden = self.gan_gen(z)
-            errG = self.gan_disc(fake_hidden)
-            errG.backward(self.one)
+            errG = self.gan_disc(fake_hidden) * 10 # * 1000 * 100
+            errG.backward()
             errGs.append(errG.data.item())
+
+            #self.show_grad_gen()
 
         self.optimizer_gan_g.step()
 
@@ -471,7 +520,6 @@ class Trainer(object):
 
     def _gradient_accumulation_d(self, true_batches, normalization, total_stats, report_stats):
         self.gan_disc.train()
-        self.model.eval()
 
         if self.accum_count > 1:
             self.optimizer_gan_d.zero_grad()
@@ -490,20 +538,21 @@ class Trainer(object):
 
             # 2. F-prop all but generator.
             with torch.no_grad():
-                _, real_hidden, _ = self.model.encoder(src, src_lengths)
+                _, real_hidden, _ = self.model(src, None, src_lengths, only_encode=True)
             Z_vec = real_hidden[0]   # (batch_size, model_dim)
             errD_real = self.gan_disc(Z_vec.detach())
-            errD_real.backward(self.one)
 
             batch_size = real_hidden.size(1)
-            z = Variable(torch.Tensor(batch_size, self.gan_gen.ninput).normal_(0, 1).cuda())
+            z = torch.Tensor(batch_size, self.gan_gen.ninput).normal_(0, 1).cuda()
             fake_hidden = self.gan_gen(z)
             errD_fake = self.gan_disc(fake_hidden.detach())
-            errD_fake.backward(self.mone)
 
             gradient_penalty = self.calc_gradient_penalty(self.gan_disc, Z_vec.data, fake_hidden.data)
-            gradient_penalty.backward()
 
+            loss = (errD_real - errD_fake * 10 + gradient_penalty)
+            loss.backward()
+
+            #self.show_grad_disc()
 
             errD_reals.append(errD_real)
             errD_fakes.append(errD_fake)
@@ -511,12 +560,10 @@ class Trainer(object):
 
         self.optimizer_gan_d.step()
 
-        self.model.train()
-
         return errDs, errD_reals, errD_fakes
 
-
-    def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats):
+    def _gradient_accumulation_gan_ae(self, true_batches, normalization, total_stats, report_stats, alpha=0.001):
+        # Should think about it and refactor backward
         self.model.train()
 
         if self.accum_count > 1:
@@ -531,18 +578,18 @@ class Trainer(object):
             if self.accum_count == 1:
                 self.optim.zero_grad()
 
-            _, real_hidden, _ = self.model.encoder(src, src_lengths, noise=False)
+            _, real_hidden, _ = self.model(src, None, src_lengths, only_encode=True, noise=False)
             Z_vec = real_hidden[0]
-            Z_vec.register_hook(grad_hook)
-            errD_real = self.gan_disc(Z_vec)
-            errD_real.backward(self.mone)
-            #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
+            Z_vec.register_hook(lambda grad: grad * alpha)
+            errD_real = -self.gan_disc(Z_vec)
+            errD_real.backward()
+            #print('errD_real', errD_real)
+
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)  # clip hardcoded
 
         self.optim.step()
 
-
-    def _gradient_accumulation(self, true_batches, normalization, total_stats,
-                               report_stats):
+    def _gradient_accumulation(self, true_batches, normalization, total_stats, report_stats):
         if self.accum_count > 1:
             self.optim.zero_grad()
 
@@ -582,6 +629,7 @@ class Trainer(object):
                         shard_size=self.shard_size,
                         trunc_start=j,
                         trunc_size=trunc_size)
+                    #print('batch_stats.loss', batch_stats.loss / normalization)
 
                     if loss is not None:
                         self.optim.backward(loss)
@@ -622,6 +670,7 @@ class Trainer(object):
                 onmt.utils.distributed.all_reduce_and_rescale_tensors(
                     grads, float(1))
             self.optim.step()
+            #print('learning_rate()', self.optim.learning_rate())
 
     def _start_report_manager(self, start_time=None):
         """

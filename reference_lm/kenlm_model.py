@@ -11,8 +11,8 @@ from .ref_model import ReferenceLM
 
 
 LMPLZ_PATH = '/usr/local/bin/lmplz'
-MODEL_PATH = 'knlm.arpa'
-COMPRESSING = 50
+MODEL_PATH = '/data/rimarakulin/tmp_knlm.arpa'
+COMPRESSING = 20
 
 
 def dump_sents(sents):
@@ -44,7 +44,7 @@ class KenlmModel(ReferenceLM):
             'trainp': fp,
             'modelp': os.path.join(os.getcwd(), MODEL_PATH)
         }
-        if COMPRESSING:
+        if COMPRESSING is None:
             cmd = '{lmplzp} -o {N} < {trainp} > {modelp}'.format(**params)
         else:
             params['s'] = COMPRESSING
